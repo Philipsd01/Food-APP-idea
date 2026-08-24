@@ -14,8 +14,10 @@ const client = new Anthropic({
 
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 
-const DEFAULT_LAT = 34.6687;
-const DEFAULT_LNG = 135.5014;
+// Fallback only — used if the browser's geolocation fails or is denied.
+// No longer assumes Osaka; leave null and require real coordinates instead.
+const DEFAULT_LAT = null;
+const DEFAULT_LNG = null;
 
 const PRICE_BUDGET_MAP = {
   "under 10": 1, "under $10": 1, "budget": 1, "cheap": 1,
@@ -60,9 +62,41 @@ function priceLevel(level) {
   return map[level] || null;
 }
 
+// Extracts the raw text from a Claude API response, with clear diagnostics
+// if the model didn't return a usable text block (e.g. truncation, refusal,
+// or an unexpected content block type).
+function extractText(response, label) {
+  const blocks = response.content || [];
+
+  if (blocks.length === 0) {
+    console.error(`[${label}] response.content was empty:`, JSON.stringify(response, null, 2));
+    throw new Error(`${label}: empty response from Claude`);
+  }
+
+  // Claude Sonnet 5 uses adaptive thinking by default, so the response can
+  // include a "thinking" block before the actual "text" block. Find the
+  // text block wherever it is, instead of assuming it's content[0].
+  const textBlock = blocks.find(b => b.type === "text" && typeof b.text === "string");
+
+  if (!textBlock) {
+    console.error(`[${label}] No text block found. Block types were:`, blocks.map(b => b.type).join(", "));
+    throw new Error(`${label}: no text block in response (got: ${blocks.map(b => b.type).join(", ")})`);
+  }
+
+  if (response.stop_reason === "max_tokens") {
+    console.warn(`[${label}] WARNING: response was cut off (stop_reason: max_tokens). Consider raising max_tokens.`);
+  }
+
+  return textBlock.text;
+}
+
 async function fetchFromGoogle(query, analysis, userLat, userLng) {
   const lat = userLat || DEFAULT_LAT;
   const lng = userLng || DEFAULT_LNG;
+
+  if (lat == null || lng == null) {
+    throw new Error("No location available — browser geolocation failed and no default is set.");
+  }
 
   const rawCuisine = analysis.cuisine || "";
   const cuisines = rawCuisine
@@ -76,13 +110,11 @@ async function fetchFromGoogle(query, analysis, userLat, userLng) {
   } else if (cuisines.length > 1) {
     searchTerms = cuisines;
   } else if (cuisines.length === 1) {
-    // FIX: use cuisine name directly, NOT the full accumulated query blob
     searchTerms = cuisines;
   } else {
     searchTerms = [query];
   }
 
-  // FIX: append location landmark to Google query when specified
   const locationHint = analysis.location ? ` near ${analysis.location}` : "";
 
   const allPlaces = new Map();
@@ -90,10 +122,12 @@ async function fetchFromGoogle(query, analysis, userLat, userLng) {
   for (const term of searchTerms) {
     // Don't append "restaurant" for brand/chain searches — it confuses Google Places
     const isBrandSearch = !analysis.cuisine && analysis.dish;
+    // No longer hardcodes "Osaka Japan" — relies on the `location` bias param
+    // (lat/lng) below, which now reflects the user's real position.
     const googleQuery = isBrandSearch
-      ? `${term}${locationHint} Osaka Japan`
-      : `${term} restaurant${locationHint} Osaka Japan`;
-    console.log(`Google Places query: "${googleQuery}"`);
+      ? `${term}${locationHint}`
+      : `${term} restaurant${locationHint}`;
+    console.log(`Google Places query: "${googleQuery}" (near ${lat}, ${lng})`);
 
     const params = {
       query: googleQuery,
@@ -126,7 +160,7 @@ async function fetchFromGoogle(query, analysis, userLat, userLng) {
       allPlaces.set(place.name, {
         name: place.name,
         cuisine: term,
-        location: place.vicinity || "Osaka",
+        location: place.vicinity || "",
         price: priceLevel(place.price_level) || (place.rating ? `Rated ${place.rating}★` : "See Google Maps"),
         price_level: place.price_level ?? null,
         latitude: placeLat,
@@ -135,7 +169,7 @@ async function fetchFromGoogle(query, analysis, userLat, userLng) {
         open_now: place.opening_hours?.open_now ?? null,
         rating: place.rating || null,
         review_count: place.user_ratings_total || 0,
-        description: `${place.name} is located in ${place.vicinity || "Osaka"}. ${place.rating ? `Rated ${place.rating}/5 based on ${place.user_ratings_total} reviews.` : ""} ${place.opening_hours?.open_now !== undefined ? (place.opening_hours.open_now ? "Currently open." : "Currently closed.") : ""}`,
+        description: `${place.name} is located in ${place.vicinity || "the area"}. ${place.rating ? `Rated ${place.rating}/5 based on ${place.user_ratings_total} reviews.` : ""} ${place.opening_hours?.open_now !== undefined ? (place.opening_hours.open_now ? "Currently open." : "Currently closed.") : ""}`,
         reviews: [
           place.rating ? `Rated ${place.rating}/5 stars by ${place.user_ratings_total || 0} Google reviewers.` : "No rating available.",
           place.opening_hours?.open_now !== undefined ? (place.opening_hours.open_now ? "Currently open." : "Currently closed.") : "Opening hours unknown.",
@@ -155,7 +189,7 @@ async function analyzeQuery(userQuery, previousQuery) {
     : `Query: "${userQuery}"`;
 
   const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-5",
     max_tokens: 600,
     messages: [{
       role: "user",
@@ -197,7 +231,7 @@ Respond ONLY with a valid JSON object. No comments, no extra text, no markdown:
     }],
   });
 
-  const raw = response.content[0].text.replace(/```json|```/g, "").trim();
+  const raw = extractText(response, "analyzeQuery").replace(/```json|```/g, "").trim();
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
   if (start === -1 || end === -1) throw new Error('No JSON object found in analyzeQuery response');
@@ -216,14 +250,15 @@ async function searchRestaurants(userQuery, analysis, restaurantData) {
   }
 
   const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2000,
+    model: "claude-sonnet-5",
+    max_tokens: 4096, // raised from 2000 — Sonnet 5's tokenizer uses more tokens per
+                       // response than older models, and 20 scored restaurant entries
+                       // plus evidence/tags was very likely getting truncated at 2000.
     messages: [{
       role: "user",
       content: `You are a restaurant discovery AI.
 
 The user searched: "${userQuery}"
-The user is located in: Osaka, Japan
 
 Here is your analysis of what they want:
 ${JSON.stringify(analysis, null, 2)}
@@ -235,12 +270,13 @@ SCORING RULES:
 - Score each restaurant from 0 to 100 based on how well it matches.
 - CUISINE IS THE HIGHEST PRIORITY. Wrong cuisine = max score 35. Right cuisine = base score 60.
 - If the user said "Japanese or Italian", both cuisines are equally valid — return a balanced mix, do NOT favour one over the other.
-- - If a specific dish was requested (e.g. wagyu, ramen), heavily weight restaurants likely to serve that dish.
+- If a specific dish was requested (e.g. wagyu, ramen), heavily weight restaurants likely to serve that dish.
 - If a specific brand or chain was requested (e.g. Starbucks, McDonald's), the ONLY criteria is whether the restaurant name matches that brand. Score any matching location 90+. Ignore cuisine scoring entirely for brand searches.
 - Factor in distance_km: under 1 km = great, under 3 km = good, under 5 km = acceptable.
 - If a specific location or landmark was requested, prioritise restaurants closest to it.
 - "must_not" items are HARD DISQUALIFIERS — score below 20 if matched.
-- ATMOSPHERE: "quiet", "relaxed", "peaceful", "chill", "unwind", "low-key" mean LOW NOISE and CASUAL PACE. If atmosphere contains any of these words, HARD PENALISE omakase, counter dining, fine dining, and formal restaurants — score them below 40 regardless of rating. A neighbourhood izakaya or casual ramen shop should outscore a Michelin-starred counter.- Use Google rating and review count as quality signals but do not let high ratings override a wrong vibe.
+- ATMOSPHERE: "quiet", "relaxed", "peaceful", "chill", "unwind", "low-key" mean LOW NOISE and CASUAL PACE. If atmosphere contains any of these words, HARD PENALISE omakase, counter dining, fine dining, and formal restaurants — score them below 40 regardless of rating. A neighbourhood izakaya or casual ramen shop should outscore a Michelin-starred counter.
+- Use Google rating and review count as quality signals but do not let high ratings override a wrong vibe.
 - Price has already been pre-filtered — do not penalise any restaurant in this list for price.
 - Only return restaurants that genuinely match. Return [] if nothing scores above 30.
 
@@ -263,10 +299,13 @@ Respond ONLY with a JSON array, no other text:
     }],
   });
 
-  const raw = response.content[0].text.replace(/```json|```/g, "").trim();
+  const raw = extractText(response, "searchRestaurants").replace(/```json|```/g, "").trim();
   const start = raw.indexOf('[');
   const end = raw.lastIndexOf(']');
-  if (start === -1 || end === -1) throw new Error('No JSON array found in searchRestaurants response');
+  if (start === -1 || end === -1) {
+    console.error("searchRestaurants: could not find a JSON array in the response. Raw text was:\n", raw);
+    throw new Error('No JSON array found in searchRestaurants response');
+  }
   return JSON.parse(raw.slice(start, end + 1));
 }
 
