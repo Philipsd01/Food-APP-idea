@@ -1,0 +1,354 @@
+[
+  {
+    "name": "Yakiniku Rikimaru Sennichimae",
+    "cuisine": "Yakiniku (Japanese BBQ)",
+    "location": "Sennichimae, Namba",
+    "price": "4000-6000 JPY per person (~27-40 USD)",
+    "latitude": 34.6694,
+    "longitude": 135.5025,
+    "review_count": 13845,
+    "description": "Popular all-you-can-eat wagyu BBQ spot above Don Quijote in Sennichimae. Choose from standard, premium or wagyu courses with 90-120 minute time limits. Lively and bustling, open until 1am.",
+    "reviews": [
+      "Excellent all-you-can-eat BBQ specializing in wagyu. The beef quality was impressive — tender, flavorful and well marbled from start to finish.",
+      "We did the 90 minute course, great value. The thick ox tongue was a highlight, and service was prompt and efficient.",
+      "Very lively and crowded but that's part of the charm. Interior is spacious, good for groups. Reservation is a must, they fill up fast.",
+      "Had the premium course — fantastic selection and food came out fast. Music and energy make it a fun night out.",
+      "Mixed experience — the wagyu didn't taste like proper wagyu, small pieces with no real marbling. Service was cold and unfriendly. Good energy in the room but food didn't live up to the hype."
+    ]
+  },
+  {
+    "name": "Chiyomatsu (元祖5センチかつ丼)",
+    "cuisine": "Tonkatsu / Katsudon",
+    "location": "Sennichimae, Namba",
+    "price": "2000-3000 JPY per person (~13-20 USD)",
+    "latitude": 34.6697,
+    "longitude": 135.5042,
+    "review_count": 1706,
+    "description": "Famous for Japan's thickest pork cutlet — a 5cm katsudon. Tiny 12-seat counter restaurant where you watch the chef fry and cut right in front of you. Expect long queues, takeaway is a smart option.",
+    "reviews": [
+      "Came specifically for the large tonkatsu. Queue was 90 minutes but takeaway was ready in 10. The pork is thick, roasted 12 hours then fried — very tender and delicious.",
+      "Definitely not lying about the thickest pork cutlet in Japan. Perfect pink center. Only 12 counter seats so they rush you a bit when it's busy.",
+      "The cutlet was a solid 3cm thick with very thin breading, still juicy and tender as a takeout order. The sauce was a touch salty but overall great. Recommend grabbing it to go.",
+      "Fun experience sitting at the counter watching the chef work. Rice texture was a bit off but the fried pork itself is solid. Would only return if no queue — otherwise get the takeaway sandwich.",
+      "Took 45 minutes to queue at lunch. The rice with egg topping is lovely. The lady taking orders outside while you queue is a nice touch to speed things up."
+    ]
+  },
+  {
+    "name": "Live Jazz & Bar Proust Osaka",
+    "cuisine": "Jazz Bar / Cocktails & Food",
+    "location": "Higashishinsaibashi, Namba area",
+    "price": "5000-8000 JPY per person (~33-53 USD)",
+    "latitude": 34.6733,
+    "longitude": 135.5031,
+    "review_count": 229,
+    "description": "Intimate live jazz bar in Shinsaibashi open from 7pm. Cover charge applies plus mandatory food and drink order. Warm lighting, excellent acoustics, and a rotating lineup of professional jazz musicians. Cozy and romantic rather than a loud party spot.",
+    "reviews": [
+      "One of those rare places that stays with you. Warm lighting, soulful live jazz, craft cocktails — the whole experience feels personal and unhurried. Not commercial or touristy at all.",
+      "Staff were attentive and English level was excellent. A trio was playing that night and they were incredible. Acoustics of the room are amazing. Would give it 10/10 on all aspects.",
+      "Great jazz spot, fun hang with friends. Cover charge per person and you must order at least one food item and one drink. Food is small tapas-style plates and a bit subpar, but the salted vanilla ice cream was amazing. Atmosphere and service are the real draw.",
+      "Fantastic 5-piece band, foot-tapping and soul-soothing. Music charge is reasonable. Book in advance to avoid disappointment.",
+      "Recent visit: performance was decent but not worth 2500 yen per person cover. Had to order food and drinks on top. Service was great but the visual performance wasn't very impressive that night."
+    ]
+  },
+  {
+    "name": "Salon de Mon Cher",
+    "cuisine": "French Café / Patisserie",
+    "location": "Nishishinsaibashi, Shinsaibashi",
+    "price": "1000-2000 JPY per person (~7-13 USD)",
+    "latitude": 34.6745,
+    "longitude": 135.5013,
+    "review_count": 502,
+    "description": "Elegant French-style cake shop and café famous for the Dojima Roll. Dine-in café with afternoon tea, cake sets, and coffee. Quiet and refined atmosphere. Closes at 7pm.",
+    "reviews": [
+      "French vibes cake shop with lots of cake and dessert options. The grape cake roll was impressive and the coffee was a perfect match. Quiet, so it's easy to talk. No wait.",
+      "Randomly walked past and decided to try it — such a nice place. Quiet and relaxing, great for a break with a friend. Highly recommended for brunch.",
+      "Visited for afternoon tea, had been curious for a while. Atmosphere and taste were both wonderful. Spacious tables, peaceful — no clattering dishes or loud conversations. Will definitely return.",
+      "The Dojima Roll cake is the star here, worth coming for. Service was polite and attentive. Not crowded on a weekday afternoon.",
+      "Recent negative: staff were unenthusiastic and unknowledgeable about the products. Service has been inconsistent lately.",
+      "Recent negative: came to dine in, was not given water or a menu and was left waiting while customers who arrived after me were served. Left without ordering. Love the Dojima Roll but the service interaction was terrible."
+    ]
+  },
+  {
+    "name": "Gyukatsu Motomura Namba",
+    "cuisine": "Gyukatsu (Beef Cutlet)",
+    "location": "Namba, Chuo Ward",
+    "price": "2000-3000 JPY per person (~13-20 USD)",
+    "latitude": 34.6687,
+    "longitude": 135.5014,
+    "review_count": 22536,
+    "description": "Hugely popular gyukatsu spot in Namba basement. You grill your own beef cutlet at the table to your preferred doneness. Attentive service, unlimited rice and sauces. Expect queues of 30-60 minutes. No reservations, no takeaway. Open until 10pm.",
+    "reviews": [
+      "Amazing food experience. Waited 30 minutes but they gave us a kendama to pass the time and took our orders during the wait so food arrived immediately when seated. The meat was buttery inside and crispy outside. Service was attentive and explained everything clearly.",
+      "Clean, superb service, and it didn't matter that we don't speak Japanese — staff handled it perfectly. The small size is enough given the variety of sides. Great quality, will come back soon.",
+      "Waited about 20 minutes total. Food came almost immediately after sitting. Beef was tender but crispy — slightly salty and oily for my taste but definitely a must-try for the texture. Service was amazing.",
+      "High quality gyukatsu at a reasonable price. Arrived at 11:10am and waited about 40 minutes. The soy and garlic dipping sauces are fantastic — dip before grilling rather than just salting it.",
+      "Recent visit: waited 30-60 minutes at lunch but worth it. Delicious food and outstanding service."
+    ]
+  },
+  {
+    "name": "Ganko Sushi Dotonbori",
+    "cuisine": "Sushi / Washoku (Traditional Japanese)",
+    "location": "Dotonbori, Chuo Ward",
+    "price": "2000-7000 JPY per person (~13-47 USD)",
+    "latitude": 34.6687,
+    "longitude": 135.5014,
+    "review_count": 1882,
+    "description": "Long-established sushi and washoku restaurant in the heart of Dotonbori, operating since 1963. Spacious counter seating lets you watch the chefs work. Traditional Japanese dining atmosphere despite the busy tourist area. Serves sushi, sashimi, tempura, sukiyaki, udon and full set menus. Open until 10:30pm, reservations available.",
+    "reviews": [
+      "Operating since 1963, this place retains a distinctly traditional character despite being in a tourist hotspot. Sashimi was exceptionally fresh, nigiri prepared in classic style with well-seasoned rice. Tempura light and crisp. A coherent, well-structured meal — traditional technique and reliable execution throughout.",
+      "Tried their sukiyaki, sashimi, tempura and sushi without even knowing these were their specialties. Food was incredibly fresh and flavorful, service genuinely warm, atmosphere had authentic Japanese charm. Will definitely come back.",
+      "Second time visiting this chain, ten years apart — both times equally lovely. Staff were incredibly friendly and warm. Please do not change this place.",
+      "Walked in randomly — food was great, quality top notch. Adventure yourself to order whatever you like and give wasabi a try!",
+      "Must visit when in Osaka. Best sushi I have had in Japan. Loved everything we tried.",
+      "Quality ingredients prioritized over innovation. The ratio of quality to price, and watching everything prepared fresh at the counter, is incredible. Highly recommended."
+    ]
+  },
+  {
+    "name": "Long Dinh Vietnam Restaurant",
+    "cuisine": "Vietnamese",
+    "location": "Shinsaibashisuji, Chuo Ward",
+    "price": "1000-2000 JPY per person (~7-13 USD)",
+    "latitude": 34.6726,
+    "longitude": 135.5008,
+    "review_count": 3664,
+    "description": "Vietnamese restaurant on the 3rd floor in Shinsaibashi with views of Dotonbori. Serves pho, banh mi, stir-fries and Vietnamese classics. Open until midnight. Delivery and takeaway available. Relaxed atmosphere, good for groups.",
+    "reviews": [
+      "Really good and delicious food. Service is fast and kind. Got the banh mi and it was super delicious.",
+      "Stumbled upon this on a random Wednesday night needing something warm with a home-cooked feel — exactly what we needed. Food is amazing, service lovely, and we got an awesome view of Dotonbori. Highly recommend.",
+      "Beautiful view beside the Osaka bridge, food is quite good, interior decorated in a style reminiscent of Hoi An.",
+      "The pho was delicious! Clean restaurant, great service.",
+      "Food was fine but didn't reach greatness. Duck was overcooked, fish didn't stand out. Ban xiao pancake was a definite highlight — fresh and delicious. Beef pho was also a standout. Staff accommodated dietary restrictions well. Server pushed for a 5-star review at the end which wasn't appreciated.",
+      "Negative: food was absolutely terrible and ingredients felt unfresh. By far the worst pho the reviewer had tasted across Vietnam, Thailand, Japan and China. Prices felt expensive for the quality. Strong dissenting opinion — may reflect an off night or specific dishes to avoid."
+    ]
+  },
+  {
+    "name": "Indian Curry Minami",
+    "cuisine": "Indian Curry (Japanese style)",
+    "location": "Namba, Chuo Ward",
+    "price": "1000 JPY per person (~7 USD)",
+    "latitude": 34.6644,
+    "longitude": 135.5014,
+    "review_count": 848,
+    "description": "Long-standing local Japanese-style Indian curry spot in Namba. Known for deeply flavored curry served with generous rice. Counter seating only, no reservations, no delivery. Quick eat, popular with locals and solo diners. Open lunch and dinner with a break between 15:30-17:00. Cash and PayPay accepted.",
+    "reviews": [
+      "The best curry of my life. A trip to Osaka without trying Indian curry here is only half complete. Just visit without hesitation.",
+      "Great curry, very tasty and minimalist — straight to the point. A place for locals rather than tourists. Recommend for a quick eat. Low noise level, no wait.",
+      "First Indian curry experience was here. The spice followed by sweetness was refreshing and addictive — used to go twice a week. Revisiting after a long time rediscovered the depth of the curry. Truly delicious. Recommended dishes: egg curry, large cabbage pickles, large curry with roux and rice.",
+      "Stumbled in and the curry was just the right amount of spice and delicious. Was also really surprised by how much rice they gave.",
+      "So delicious I felt compelled to write a review. Koreans will absolutely love it — felt like eating Korean curry. Good, good.",
+      "Negative: didn't get the hype. Curry was sweet and spicy but way more on the sweet side. Only two small pieces of meat with a huge amount of rice and sauce — bizarre portion balance. Not coming back."
+    ]
+  },
+  {
+    "name": "Trattoria Pizzeria Allegro",
+    "cuisine": "Italian (Pizza & Pasta)",
+    "location": "Sennichimae, Namba",
+    "price": "2000-3000 JPY per person (~13-20 USD)",
+    "latitude": 34.6691,
+    "longitude": 135.5033,
+    "review_count": 679,
+    "description": "Wood-fired Neapolitan pizza restaurant in Sennichimae. Known for authentic thin-crust pizza baked in one of the world's sixth hottest ovens, housemade chili oil, and burrata. Good wine list with glasses from 600 yen. Dinner reservations strongly recommended. Open lunch and dinner with a break. Takeaway and delivery available. Cozy back room, good for dates and casual gatherings.",
+    "reviews": [
+      "Chasing that perfect Japanese pizza. Went with the prosciutto and rocket — didn't disappoint. Paired with a highball and glass of red, olives and pickles to start. Vibe was excellent, cozy in the back room.",
+      "The white-based blanco is terrific. Operating hours are short and they don't accept solo reservations online — a lone diner has to try their luck asking for a slot before others arrive. High table turnover rate.",
+      "Pizza buonissima! Everything made from scratch. Their homemade chili oil is a great topping if you like spicy. My son ate the whole pie by himself.",
+      "If you're looking for Italian food in Namba, this is a must-see. Pizzas baked in a wood-fired oven have a chewy, fragrant crust. The Margherita, though simple, has incredible depth. Interior is stylish but unpretentious — ideal for dates and relaxed gatherings. No wonder it's so popular you sometimes can't get in without a reservation.",
+      "Best pizza I've had across many places including Venice.",
+      "Negative: pizzas are good but quite soft with a thin, floppy base.",
+      "Burrata is outstanding. Pizzas baked in the world's sixth hottest oven, best enjoyed with spiced oil. Wine by the glass from 600 yen. Some price discrepancy between English and Japanese menus — English prices include tax for clarity."
+    ]
+  },
+  {
+    "name": "Toriko Meat Namba",
+    "cuisine": "Italian Buffet / All-you-can-eat & drink",
+    "location": "Namba, Chuo Ward",
+    "price": "4000-5000 JPY per person (~27-33 USD)",
+    "latitude": 34.6685,
+    "longitude": 135.5012,
+    "review_count": 694,
+    "description": "Italian buffet restaurant on the 3rd floor of N2Place in Namba. All-you-can-eat and all-you-can-drink format. Enthusiastic chef interacts with guests. Open until 23:30. Reservation required. No takeaway or delivery. Spacious with separate rooms. Good for groups.",
+    "reviews": [
+      "A very unforgettable Italian buffet experience. The dishes are exquisite and the amount of dishes is appropriate. The chef is very enthusiastic and will ask about the taste — every main dish is worth recommending.",
+      "Good food, friendly waiter and attentive service. Just round the corner from Nankai Street, very convenient location. Recommended.",
+      "Amazing all you can eat — everything was so tasty and the staff are all gorgeous. 100% recommend for lunch or dinner. Some veggie items available.",
+      "Used this restaurant for a long-awaited dinner gathering. Food was delicious, the all-you-can-drink selection was excellent, and the atmosphere was fantastic. Will use it again.",
+      "Perfect for daytime drinking. Atmosphere 5/5 but food rating was 3 on one recent visit.",
+      "Was able to make a same-day lunch reservation. Food was very satisfying."
+    ]
+  },
+  {
+    "name": "Koshitsu Sosakuryori MUSUBI Namba",
+    "cuisine": "Izakaya / Horse Sashimi & Meat Courses",
+    "location": "Namba, Chuo Ward",
+    "price": "4000-5000 JPY per person (~27-33 USD)",
+    "latitude": 34.6692,
+    "longitude": 135.5017,
+    "review_count": 63,
+    "description": "Intimate izakaya on the 4th floor in Namba specializing in horse sashimi (basashi) and creative meat-focused small courses. Tatami private rooms available. All-you-can-drink options. Opens at 13:00. Dinner reservations recommended. Delivery available.",
+    "reviews": [
+      "Was looking for a horse sashimi experience and this place did not disappoint. Tried the 8-preparation course covering aorta, tongue, heart, 3 different rib preparations, mane, and thigh. Each texture was unique and high quality. The chef is accommodating with language barriers and the vibe was very relaxed. Such a high quality experience.",
+      "The location is fantastic, staff are all friendly and fun, and the food is super delicious. Found this place because I love horse sashimi — a true hidden gem. It's not always full so it's a great find. Will be back soon.",
+      "First family visit. Got the all-you-can-drink option and everything — starters, tempura, horse sashimi and meat — was delicious so the drinks went down very easily. Staff were incredibly friendly and we ended up chatting with them too long. They also have spacious tatami rooms which makes it a fantastic spot to spend time with someone special.",
+      "Negative: waited about 1 hour for sashimi and hot pot. Taste is fine but not worth the wait."
+    ]
+  },
+  {
+    "name": "Kushikatsu Nishiki",
+    "cuisine": "Kushikatsu / Izakaya",
+    "location": "Namba, Chuo Ward",
+    "price": "2000-3000 JPY per person (~13-20 USD)",
+    "latitude": 34.6690,
+    "longitude": 135.5028,
+    "review_count": 223,
+    "description": "Long-standing local kushikatsu izakaya in Namba serving deep-fried skewers, oden, sashimi and small plates. Counter seating and bar area. QR code ordering available for international guests. English menu via QR code. Cash only. Opens 16:30. Good for solo dining. Smoke-free.",
+    "reviews": [
+      "Food was okay and it's nice that they have an English menu via QR code. Affordable but not cheap. Little family-owned eatery mostly serving locals.",
+      "Found it wanting to eat oden — stumbled across it and the Japanese atmosphere was perfect. Oden with tempura was very delicious. Highly recommend trying it.",
+      "Well-established, affordable kushikatsu restaurant. Offers not just kushikatsu but also à la carte dishes, oden, fried food and sashimi at incredibly reasonable prices. A warm and welcoming restaurant. The beef skewer is the one to try — incredibly tender and delicious. The amberjack sashimi was also great. Bill was only 3,780 yen — what a deal!",
+      "Very crowded on a weekend with both tourists and Japanese customers. Ordering via QR code so international customers can order easily. The location, price and deliciousness are hard to find elsewhere.",
+      "Kushikatsu were piping hot and crispy. Shrimp were small but packed with flavor, beef skewers were outstanding. Loach kushikatsu was sweet and paired best with Worcestershire sauce. Octopus was one of the highlights. Always drank every drop of the oden broth. Chicken-tofu broth is something else entirely. Paid 2,380 yen. First drink ordered directly, then given a QR code on a receipt holder. Cash payment only.",
+      "Negative: recent visit rated food 3, service 2. Felt overpriced at 5,000-6,000 yen for the experience received."
+    ]
+  },
+  {
+    "name": "Arabiya Coffee",
+    "cuisine": "Kissaten / Old-school Coffee Bar",
+    "location": "Namba, Chuo Ward",
+    "price": "1000-2000 JPY per person (~7-13 USD)",
+    "latitude": 34.6690,
+    "longitude": 135.5027,
+    "review_count": 849,
+    "description": "Retro old-school Japanese coffee bar (kissaten) near Dotonbori in Namba. Famous for acidic drip coffee, french toast, caramel pudding, coffee jelly and toast. Warm retro atmosphere with decorations from many countries. Small space, only 2 staff. Closes at 19:00. No delivery. PayPay accepted. Good for solo dining and tourists.",
+    "reviews": [
+      "Trying to have breakfast before heading back to Tokyo — exceeded all expectations. French toast was incredibly moist, omelette sandwich cooked to perfection, coffee had a really good aroma, and simple bread with butter and jam was somehow amazing. A place to look forward to returning to in Osaka.",
+      "Small shop with only 2 staff — need some patience. Coffee is nice. Pudding has a hard texture, different from normal — not too sweet, a preferred style of caramel pudding. Good coffee and good atmosphere to chill.",
+      "Amazing café with a warm retro atmosphere and unique decorations from many countries. Coffee jelly was delicious, rich and refreshing. Toast was soft inside and crispy outside, pudding was excellent. Cozy place to relax, highly recommended when in Osaka.",
+      "Well-established coffee bar near Dotonbori. Retro atmosphere was calming. Coffee had a full flavor and toast was simple but delicious. Can get a bit crowded depending on time of day but a great place to enjoy the old-school atmosphere.",
+      "Coffee was above average. Pancakes were delicious and highly recommended. Pudding was firm with visible vanilla seeds — not the smooth type, but personally liked it.",
+      "Negative: coffee was standard and very acidic — not for everyone. Staff should be more amiable. Toast was pretty standard. Old style coffee shop good for nostalgia but not top notch in terms of coffee quality. Perhaps for acidic coffee lovers only.",
+      "Negative: took 40 minutes to wait for coffee and tea. Staff were offensive when asked about the order — claimed only 1 person to prepare food and drink, while other tables who arrived at the same time all got served. Reaction was a bit rude."
+    ]
+  },
+  {
+    "name": "Seafood Okonomiyaki, Oden, TOMONO",
+    "cuisine": "Okonomiyaki / Oden",
+    "location": "Namba, Chuo Ward",
+    "price": "1000-3000 JPY per person (~7-20 USD)",
+    "latitude": 34.6690,
+    "longitude": 135.5028,
+    "review_count": 353,
+    "description": "Multi-floor okonomiyaki and oden restaurant in Namba specializing in seafood okonomiyaki. Solo bar seating available upstairs. QR code ordering. Mandatory drink order per person. Opens 13:00. Takeaway available, no delivery. Alcohol and late-night snacks available.",
+    "reviews": [
+      "Affordable and solid okonomiyaki specializing in seafood. Paid around 6,000-7,000 yen for 4 people and were all filled. Multiple floors — sat on the highest floor which had very cold AC. Communication was a bit difficult. Personally rated it 4.1.",
+      "Accidentally found this hidden gem and it turned out delicious! Seafood okonomiyaki is packed with flavor, soft inside and perfectly crisp outside. The oden was heart-warming — simple yet full of depth. Sometimes the best meals are the ones you don't plan.",
+      "Came just after they opened for lunch and was ushered upstairs to a bar for solo diners. Very small but had the whole place to myself — cozy vibe. The chef was reserved but kind. Pork okonomiyaki was excellent. Tried all the different sauces and most tasted great with the food. Very affordable considering the amount of food.",
+      "Negative: greeter said 1 food and 1 drink upon entry — mandatory drink not stated outside which was confusing. Takoyaki fell apart when eating. Okonomiyaki was pretty good but not as amazing as expected. First place in Japan to give a tip option at checkout. QR code ordering means no interaction until food arrives.",
+      "Food was delicious but unclear why there were no fish cakes in the fish cake platter. If visiting in the evening they clear unused tableware between services to wash before midnight — seemed strange at first but they do it at all tables.",
+      "Food quality is very good and price is reasonable. The only unusual thing is a mandatory drink per meal — not a problem but worth knowing. Service is also very good and location is great, right in the center of Namba."
+    ]
+  },
+  {
+    "name": "Pivot BASE Cafe & Bar @Dotonbori",
+    "cuisine": "Vegan / Cocktail Bar",
+    "location": "Dotonbori, Chuo Ward",
+    "price": "1000-2000 JPY per person (~7-13 USD)",
+    "latitude": 34.6687,
+    "longitude": 135.5021,
+    "review_count": 1155,
+    "description": "Vegan restaurant and bar in the heart of Dotonbori. Serves vegan and vegetarian dishes alongside cocktails, wine, beer and coffee. Relaxed and trendy atmosphere, smoke-free, Wi-Fi available. Dine-in only, no takeaway or delivery. Closes 22:30. No reservations.",
+    "reviews": [
+      "Amazing vegan food right in the heart of Dotonbori, each and every dish we ordered was top notch — quality, service, ambience and location stood out for us. We'll remember this meal for a very long time.",
+      "Excellent vegetarian ramen and gyoza. Everything is clean and the atmosphere is great. Highly recommended.",
+      "Will come again next time for the ramen.",
+      "We found this place and we loved it. The food we tried was delicious, the staff were incredibly friendly, and the service was super fast. Definitely a must-see if you are vegetarian or vegan. The only downside was we discovered it the day before we left Japan!",
+      "This restaurant is an oasis for vegan people on a street full of wagyu meat shops. The prices matched the plates we got. No small plates and absolutely delicious. Staff was perfect and the place was not at all crowded.",
+      "Negative: for a vegan place they could do better, especially with the salad. Takoyaki were kinda raw inside. Service and atmosphere are great, but the food didn't impress."
+    ]
+  },
+  {
+    "name": "Menya Joroku",
+    "cuisine": "Ramen (Osaka-style Shoyu)",
+    "location": "Nanbasennichimae, Chuo Ward",
+    "price": "1000-2000 JPY per person (~7-13 USD)",
+    "latitude": 34.6685,
+    "longitude": 135.5030,
+    "review_count": 1653,
+    "description": "Classic Osaka-style shoyu ramen restaurant near Namba Station. Small local counter spot with a no-frills, efficient atmosphere. Limited menu focused on traditional Takaida-style ramen with rich broth and firm noodles. Popular with students and regulars. Expect 30-60 min wait at busy times. Dine-in only, cash only, no reservations.",
+    "reviews": [
+      "Really tasty ramen. I recommend the most popular version highlighted in the menu. The place is really small so there could be a wait, but there are waiting spots inside. Food comes fast and service speaks English. Overall one of the best ramen — simple and tasty for a good price.",
+      "Excellent affordable Osaka-style ramen. Don't expect top notch service for foreigners as they're very busy. Go in, order, go out — don't chat and stay seated after eating as there are always people queueing.",
+      "A well-known ramen spot in Osaka that reflects a very traditional and straightforward style. Menu is limited, featuring classic ramen with rich broth and firm noodles. Waiting times can happen during busy hours. Offers an honest and genuine look into everyday ramen culture in Osaka.",
+      "First salt ramen at Joroku — the consistency of the green onion and the thin noodles were perfect for the season. Enjoyed it in a very hospitable setting.",
+      "Spacious waiting area inside. Was overcrowded during Golden Week but staff were incredibly friendly. The flavor is addictive — a little salty for Korean palates but so delicious you'll keep drinking the broth. Make sure to add the egg topping."
+    ]
+  },
+  {
+    "name": "Kinryu Ramen Dotonbori",
+    "cuisine": "Ramen (Tonkotsu)",
+    "location": "Dotonbori, Chuo Ward",
+    "price": "Under 1000 JPY per person (~under 7 USD)",
+    "latitude": 34.6688,
+    "longitude": 135.5016,
+    "review_count": 4255,
+    "description": "Iconic 24-hour tonkotsu ramen spot in the heart of Dotonbori. Order via vending machine. One type of ramen in two sizes with free-flow kimchi, pickled leek and garlic to customize your bowl. Legendary Osaka landmark, perfect for late-night after drinking. Queue moves fast. Cards and PayPay accepted. LGBTQ+ friendly.",
+    "reviews": [
+      "For street food, this ramen is very good. The broth is flavourful and the chashu is roasted nicely. The queue can be long but it's worth the wait. They only have tonkotsu ramen in two sizes. Free flow of kimchi and garlic too.",
+      "Light tonkotsu broth and not too salty. There is always a line no matter what time of day but it moves quickly. Came at late night around 12am — still a line but it was a hearty meal, perfect for late night.",
+      "The broth was flavoursome and the noodles had a nice bite. Only one type of ramen with sliced pork. Range of pickled vegetables to add yourself. Order through a vending machine — efficient and courteous staff.",
+      "Dotonbori was still very busy at midnight. The broth was much more Taiwanese-flavored than expected. The noodles were perfectly springy, the broth was tasty, and there was a generous amount of char siu. The spicy kimchi at the counter was delicious!",
+      "Negative: the broth itself was quite plain — without the generous free toppings of kimchi, pickled leek and garlic it felt a little lacking. A landmark in Osaka but limited surprises for those seeking a refined dining experience."
+    ]
+  },
+  {
+    "name": "Dotonbori Kukuru",
+    "cuisine": "Takoyaki",
+    "location": "Dotonbori, Chuo Ward",
+    "price": "Under 1000 JPY per person (~under 7 USD)",
+    "latitude": 34.6688,
+    "longitude": 135.5018,
+    "review_count": 1654,
+    "description": "Classic Dotonbori takoyaki shop with 36+ year history. Variety of fillings including classic octopus and mozzarella. Open kitchen — fun to watch. Dine-in, takeaway and delivery available. Reservations via Tabelog. Closes 21:00. On the pricier side for takoyaki. LGBTQ+ friendly, women-owned. Cards and PayPay accepted.",
+    "reviews": [
+      "A true Dotonbori icon. The takoyaki is delicious and very flavorful — inside is extremely hot so be careful with your first bite. Great variety of fillings and styles. The open kitchen setup is fun to watch while you wait.",
+      "The takoyaki was decent but a bit lacking in flavor. Liked the atmosphere and the servers were friendly. Being able to add sauce and toppings yourself including bonito flakes was a nice touch. The pieces were big but the octopus inside was quite small in the regular version.",
+      "Very satisfied with our visit. The octopus balls were fantastic — perfectly cooked, soft and tasty. The kimchi complemented the dish very well. Waiting time to get a table was a bit longer but reflects the popularity.",
+      "On the pricier side and a bit soft and gooey rather than crispy outside — but I accepted it as a pilgrimage experience. Beer and takoyaki is really the best combination.",
+      "Discovered this on Instagram and waited quite a long time, but very happy to finally try the takoyaki I had been wanting for so long."
+    ]
+  },
+  {
+    "name": "Teppan Toyoshimake",
+    "cuisine": "Teppanyaki / Wagyu Steakhouse",
+    "location": "Dotonbori, Chuo Ward",
+    "price": "Over 10000 JPY per person (~67+ USD)",
+    "latitude": 34.6688,
+    "longitude": 135.5019,
+    "review_count": 475,
+    "description": "Premium teppanyaki restaurant on the 2nd floor in Dotonbori with river views. Wagyu beef set dinners cooked on the teppan. Counter seating lets you watch the chef. Wine pairing available, good wine list. Quiet and intimate atmosphere. Reservations recommended. Opens 17:00. Dine-in only. Credit card accepted. Good for dates, special occasions and families.",
+    "reviews": [
+      "We had the set dinner with two different wagyu beef cuts — really good taste. Service is really nice, the waitress explains each dish and how to eat. Located next to the riverside, even without a reservation we were arranged to sit with a nice river view. The brownie with strawberry dessert was lovely.",
+      "Our family went for dinner on our first night in Osaka and it was amazing. The food was rich and cooked perfectly, and the kids had their own set plates which was great value for the family. The service was incredible. Highly recommend for dates or families looking for a special night out.",
+      "The best restaurant in Osaka — a hidden gem. The wagyu here is even nicer than the best Kobe beef in town. Celebrated our honeymoon here and the food was incredible, drinks excellent, and the staff couldn't have done more for us. 10/10.",
+      "Amazing dinner with wine pairing. Service was excellent and very friendly. Sitting at the counter you can see how the chef works in the kitchen — very good.",
+      "Came in on a whim as my wife wanted wagyu. Got the set dinner and it was amazing — more food than expected with a fantastic view of the river in Dotonbori. Will never forget this experience. Staff and chef were wonderful."
+    ]
+  },
+  {
+    "name": "Kasuya Hozenji",
+    "cuisine": "Udon (Kasu Udon)",
+    "location": "Namba, Chuo Ward",
+    "price": "Under 1000 JPY per person (~under 7 USD)",
+    "latitude": 34.6689,
+    "longitude": 135.5024,
+    "review_count": 1332,
+    "description": "Udon specialist near Hozenji Temple in Namba, famous for Kasu Udon — a local Osaka dish with fried beef offal (abura kasu) in a rich broth. Tiny counter spot, quick and efficient. Dine-in and takeaway. No reservations. Closes 21:30. PayPay accepted. Good for solo dining and late-night after drinks. Note: some recent reviews mention hygiene concerns.",
+    "reviews": [
+      "Kasuya Hozenji is a classic Osaka ramen stop. Relatively cheap, packed with flavour, and served in a tiny one-counter setup where you watch the cook prepare your bowl right in front of you. Line up, order, eat, move on. Efficient, authentic, and memorable — I'm sure every trip to Osaka will lead me back here.",
+      "Curry udon with tempura — delicious! The owner was friendly and had menus in multiple languages. The atmosphere at my table was fantastic. Just a short walk from Hozenji Temple. Highly recommend the udon noodles — they are so chewy!",
+      "A specialist in Osaka's famous Kasu Udon (udon noodles with fried beef offal). The fried offal paired perfectly with the rich broth — it was delicious. Drank every last drop of the soup.",
+      "The perfect way to end an evening of drinks in Namba with kasu udon — a local dish from Minami-Kawachi made with udon noodles and fried tofu residue. And it is delicious.",
+      "Negative: broth had a fishy taste. Waited 15 min for seats to open up and didn't find it worth the wait. Could definitely use a deep clean.",
+      "Negative: seriously concerned about the hygiene."
+    ]
+  }
+]

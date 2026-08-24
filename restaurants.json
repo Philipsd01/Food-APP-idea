@@ -1,0 +1,376 @@
+[
+  {
+    "name": "Trattoria Vecchia",
+    "cuisine": "Italian",
+    "location": "Downtown",
+    "price": "15-30 USD per person",
+    "latitude": 34.6937,
+    "longitude": 135.5023,
+    "description": "Small family-run Italian place with handmade pasta",
+    "reviews": [
+      "Super cozy and intimate, felt like eating in someone's Italian grandmother's dining room",
+      "The carbonara was incredible, best I've had outside of Rome",
+      "Quiet enough to have a real conversation, perfect for our anniversary",
+      "Handmade pasta is the star here, you can taste the difference",
+      "Small place so make a reservation, only about 10 tables",
+      "The tiramisu is homemade and amazing"
+    ]
+  },
+  {
+    "name": "Golden Dragon Kitchen",
+    "cuisine": "Chinese",
+    "location": "Chinatown",
+    "price": "10-25 USD per person",
+    "latitude": 34.6723,
+    "longitude": 135.5054,
+    "description": "Bustling dim sum and Cantonese spot, big round tables",
+    "reviews": [
+      "Best dim sum in the city, the har gow are perfect",
+      "Great for big family gatherings, we had 12 people and they handled it easily",
+      "Loud and chaotic but that's part of the charm",
+      "Kids loved the fried rice and dumplings",
+      "Weekend brunch dim sum is the move, get there early though",
+      "Portions are huge, we always have leftovers"
+    ]
+  },
+  {
+    "name": "The Green Plate",
+    "cuisine": "Modern American",
+    "location": "Midtown",
+    "price": "40-70 USD per person",
+    "latitude": 34.6850,
+    "longitude": 135.5000,
+    "description": "Farm-to-table seasonal menu, minimalist clean decor",
+    "reviews": [
+      "Beautiful plating, every dish looks like art",
+      "The seasonal tasting menu was worth every penny, 7 courses for 2",
+      "Very quiet and upscale, not the place for loud groups",
+      "Menu changes every few weeks based on what's fresh",
+      "Great wine pairings recommended by the sommelier",
+      "Perfect date night spot, romantic lighting and great service"
+    ]
+  },
+  {
+    "name": "Sakura Sushi",
+    "cuisine": "Japanese",
+    "location": "Westside",
+    "price": "50-90 USD per person",
+    "latitude": 34.6900,
+    "longitude": 135.4880,
+    "description": "Omakase counter and regular tables, minimalist Japanese interior",
+    "reviews": [
+      "The omakase was a 12-course experience, absolutely worth it",
+      "Sitting at the counter watching the chef work is half the experience",
+      "Very calm and peaceful atmosphere, soft music in the background",
+      "Fish is incredibly fresh, they get deliveries daily",
+      "Not great for kids, it's very quiet and formal",
+      "The sake selection is excellent, staff really knows their stuff"
+    ]
+  },
+  {
+    "name": "Big Tony's Pizzeria",
+    "cuisine": "Pizza",
+    "location": "East Side",
+    "price": "5-12 USD per person",
+    "latitude": 34.6950,
+    "longitude": 135.5150,
+    "description": "No-frills New York style pizza joint with a few tables",
+    "reviews": [
+      "Best cheap pizza in the neighborhood, huge slices",
+      "Nothing fancy but the pizza is legit, crispy thin crust",
+      "My kids beg to come here every weekend",
+      "Great for a quick bite, in and out in 20 minutes",
+      "The pepperoni slice is iconic, grease dripping and all",
+      "Cash only which is annoying but the pizza makes up for it",
+      "Perfect late night food spot, open until 2am"
+    ]
+  },
+  {
+    "name": "Jardin Provencal",
+    "cuisine": "French",
+    "location": "Uptown",
+    "price": "60-120 USD per person",
+    "latitude": 34.7050,
+    "longitude": 135.4950,
+    "description": "Elegant French dining with garden courtyard seating",
+    "reviews": [
+      "The garden courtyard is magical in the evening with string lights",
+      "Felt like being transported to the south of France",
+      "We did the 5-course prix fixe for our anniversary, unforgettable",
+      "Sommelier paired every course perfectly, worth the splurge",
+      "Dress code is smart casual, not the place for jeans and sneakers",
+      "The duck confit is the best dish on the menu, order it",
+      "Service was impeccable, attentive without being intrusive"
+    ]
+  },
+  {
+    "name": "Mama Rosa's Kitchen",
+    "cuisine": "Mexican",
+    "location": "Northside",
+    "price": "8-15 USD per person",
+    "latitude": 34.7100,
+    "longitude": 135.5080,
+    "description": "Colorful family-owned taqueria with a small patio",
+    "reviews": [
+      "Most authentic tacos I've found in this city, the al pastor is incredible",
+      "Super family friendly, they even have a little coloring station for kids",
+      "The salsa bar has like 8 different salsas, all homemade",
+      "Loud and lively, mariachi band on Friday nights",
+      "Huge portions for the price, the burrito could feed two people",
+      "Love the outdoor patio on warm days, very casual vibe",
+      "Horchata is homemade and the best I've ever had"
+    ]
+  },
+  {
+    "name": "The Copper Bar & Grill",
+    "cuisine": "American",
+    "location": "Harbor District",
+    "price": "15-30 USD per person",
+    "latitude": 34.6550,
+    "longitude": 135.5100,
+    "description": "Industrial-chic gastropub with craft cocktails and elevated bar food",
+    "reviews": [
+      "Great spot for after-work drinks with colleagues",
+      "The smash burger is unreal, best burger in the harbor area",
+      "Cool industrial decor, exposed brick and copper pipes everywhere",
+      "Gets really loud on Friday and Saturday nights",
+      "Good for groups, we had a birthday party of 8 and it worked perfectly",
+      "Cocktail menu is creative, the bartenders really know their stuff",
+      "Not romantic at all but perfect for a fun casual night out"
+    ]
+  },
+  {
+    "name": "Naan & Curry House",
+    "cuisine": "Indian",
+    "location": "University District",
+    "price": "8-15 USD per person",
+    "latitude": 34.6800,
+    "longitude": 135.5200,
+    "description": "No-frills Indian spot popular with students, big portions",
+    "reviews": [
+      "Best butter chicken in the city and it's only 12 dollars",
+      "The lunch buffet is an insane deal, all you can eat for 10 bucks",
+      "Not fancy at all but the food is absolutely authentic",
+      "Great for vegetarians, tons of options unlike most places",
+      "Naan bread is fresh out of the tandoor, you can watch them make it",
+      "Can get crowded during lunch rush since it's near the university",
+      "Spice levels are legit, when they say hot they mean HOT"
+    ]
+  },
+  {
+    "name": "Blue Harbor Seafood",
+    "cuisine": "Seafood",
+    "location": "Waterfront",
+    "price": "35-65 USD per person",
+    "latitude": 34.6500,
+    "longitude": 135.5050,
+    "description": "Upscale seafood with floor-to-ceiling harbor views",
+    "reviews": [
+      "The view alone is worth the visit, floor-to-ceiling windows overlooking the harbor",
+      "Lobster roll was perfectly done, generous chunks of fresh lobster",
+      "Great spot for a special occasion, we celebrated our engagement here",
+      "Sunday brunch with the waterfront view is incredible",
+      "The raw bar is excellent, oysters were super fresh",
+      "A bit pricey but the quality matches, you get what you pay for",
+      "Romantic in the evening when the harbor lights come on"
+    ]
+  },
+  {
+    "name": "Hama Sushi",
+    "cuisine": "Sushi",
+    "location": "Train station",
+    "price": "5-12 USD per person",
+    "latitude": 34.6930,
+    "longitude": 135.5015,
+    "description": "Very casual conveyor belt sushi place with a calm atmosphere",
+    "reviews": [
+      "Perfect quick stop before catching a train, grabbed 6 plates in 15 minutes",
+      "Surprisingly calm for a conveyor belt place, not hectic at all",
+      "Great value, each plate is only a couple bucks and the quality is solid",
+      "Fun for kids, they love watching the plates go around and picking their own",
+      "The salmon and tuna nigiri are always fresh, I come here twice a week",
+      "Nothing fancy but consistently good, my go-to casual lunch spot",
+      "Touch screen ordering is easy, food arrives fast on the belt"
+    ]
+  },
+  {
+    "name": "Seoul Kitchen BBQ",
+    "cuisine": "Korean",
+    "location": "Koreatown",
+    "price": "20-35 USD per person",
+    "latitude": 34.6600,
+    "longitude": 135.5180,
+    "description": "Tabletop Korean BBQ with banchan spread and soju bar",
+    "reviews": [
+      "Grilling your own meat at the table is so fun, great for a group hangout",
+      "The banchan spread is generous, like 8 little dishes before you even start",
+      "Pork belly was perfectly marbled, melts in your mouth on the grill",
+      "Gets smoky inside but they have good ventilation at each table",
+      "The soju cocktails are dangerously good, we stayed way too long",
+      "Staff is super patient explaining how to grill if you've never done it",
+      "Late night hours are great, open until midnight on weekends"
+    ]
+  },
+  {
+    "name": "Café Mirabelle",
+    "cuisine": "French Bakery & Café",
+    "location": "Arts District",
+    "price": "8-18 USD per person",
+    "latitude": 34.6780,
+    "longitude": 135.4920,
+    "description": "Charming French café with pastries, crêpes, and light lunch",
+    "reviews": [
+      "The croissants are flaky perfection, best I've had outside Paris",
+      "Such a cute little café, feels like stepping into a Parisian side street",
+      "Perfect for a quiet morning coffee and reading a book",
+      "The croque monsieur is simple but done perfectly",
+      "They have a beautiful little terrace out front with flower boxes",
+      "Not a full dinner spot, more for breakfast, brunch, or a light lunch",
+      "The hot chocolate is thick and rich, European style not American"
+    ]
+  },
+  {
+    "name": "Ember & Oak Steakhouse",
+    "cuisine": "Steakhouse",
+    "location": "Financial District",
+    "price": "55-100 USD per person",
+    "latitude": 34.6900,
+    "longitude": 135.5100,
+    "description": "Classic upscale steakhouse with dark wood interior and whiskey bar",
+    "reviews": [
+      "The 16oz ribeye was cooked to a perfect medium rare, incredible sear",
+      "Very old-school steakhouse vibe, dark leather booths and dim lighting",
+      "Great for a business dinner, feels professional and impressive",
+      "The whiskey selection is massive, over 200 bottles behind the bar",
+      "Sides are a la carte and expensive but the creamed spinach is a must",
+      "Service is formal and polished, they remember your name",
+      "Not the place for a casual night out, it's a proper occasion restaurant"
+    ]
+  },
+  {
+    "name": "Pho Saigon Express",
+    "cuisine": "Vietnamese",
+    "location": "Riverside",
+    "price": "8-14 USD per person",
+    "latitude": 34.6750,
+    "longitude": 135.5130,
+    "description": "Family-run pho shop with 20+ broth variations and banh mi",
+    "reviews": [
+      "The broth has been simmering for hours, you can taste the depth",
+      "Best pho in the area by far, nothing else even comes close",
+      "Super fast service, food comes out in like 5 minutes",
+      "The banh mi is stuffed and crispy, great deal for 7 bucks",
+      "Small and no-frills but spotlessly clean",
+      "My go-to comfort food spot when it's cold or rainy outside",
+      "The spicy beef pho with extra tendon is my regular order"
+    ]
+  },
+  {
+    "name": "Rooftop Social",
+    "cuisine": "Mediterranean",
+    "location": "Downtown",
+    "price": "25-45 USD per person",
+    "latitude": 34.6945,
+    "longitude": 135.5030,
+    "description": "Open-air rooftop bar and restaurant with city skyline views",
+    "reviews": [
+      "The sunset views from the rooftop are absolutely stunning",
+      "Great mezze platter to share, hummus and baba ganoush were both excellent",
+      "More of a scene than a serious food place, but the vibe is unbeatable",
+      "Perfect for drinks and small plates with friends on a warm evening",
+      "Gets packed on weekends, definitely make a reservation",
+      "Music is chill lounge vibes, not too loud to talk",
+      "The grilled lamb skewers are the best thing on the menu"
+    ]
+  },
+  {
+    "name": "Abuela's Empanadas",
+    "cuisine": "Argentinian",
+    "location": "Market District",
+    "price": "6-12 USD per person",
+    "latitude": 34.6870,
+    "longitude": 135.4960,
+    "description": "Tiny empanada counter with rotating daily flavors",
+    "reviews": [
+      "The beef empanadas are the best I've had outside of Buenos Aires",
+      "They rotate flavors daily which keeps it interesting, always something new",
+      "Super quick, perfect for grabbing lunch on the go",
+      "The chimichurri sauce they give you on the side is incredible",
+      "Tiny place with only 3 stools but the food makes up for it",
+      "Really affordable, you can get a full lunch for under 10 dollars",
+      "The sweet corn and cheese empanada was an unexpected favorite"
+    ]
+  },
+  {
+    "name": "The Greenhouse",
+    "cuisine": "Vegan",
+    "location": "Westside",
+    "price": "15-28 USD per person",
+    "latitude": 34.6910,
+    "longitude": 135.4850,
+    "description": "Plant-based restaurant with industrial-greenhouse interior full of hanging plants",
+    "reviews": [
+      "Even as a non-vegan I was impressed, the mushroom burger was incredible",
+      "The interior is beautiful, plants everywhere and lots of natural light",
+      "Great smoothie and juice bar in addition to the full menu",
+      "Perfect for a healthy lunch that actually tastes good",
+      "The cauliflower wings are addictive, we ordered a second round",
+      "Very chill and relaxed atmosphere, good for working on your laptop",
+      "My vegan friends say this is the only place that doesn't feel like a compromise"
+    ]
+  },
+  {
+    "name": "Niko's Taverna",
+    "cuisine": "Greek",
+    "location": "Old Town",
+    "price": "18-35 USD per person",
+    "latitude": 34.7000,
+    "longitude": 135.5060,
+    "description": "Lively Greek restaurant with live bouzouki music on weekends",
+    "reviews": [
+      "The grilled octopus is the best appetizer I've ever had, so tender",
+      "Live music on Saturday nights makes it feel like a real Greek taverna",
+      "Great for big groups, they push tables together and make it work",
+      "The lamb chops are perfectly seasoned, simple but incredible",
+      "Ouzo shots with the owner if you stay late enough, such a character",
+      "Lively and loud in the best way, don't come here for a quiet meal",
+      "The baklava is made by Niko's mother, recipe hasn't changed in 40 years"
+    ]
+  },
+  {
+    "name": "Midnight Ramen",
+    "cuisine": "Japanese Ramen",
+    "location": "Entertainment District",
+    "price": "12-20 USD per person",
+    "latitude": 34.6680,
+    "longitude": 135.5010,
+    "description": "Late-night ramen bar with counter seating and moody lighting",
+    "reviews": [
+      "The tonkotsu broth is incredibly rich, they simmer it for 18 hours",
+      "Perfect late-night spot after drinks, exactly what you need at 1am",
+      "The spicy miso ramen with extra chashu is life-changing",
+      "Tiny place with just counter seats, feels very authentic and cozy",
+      "Soft lighting and hip-hop playing low, great atmosphere",
+      "They do a garlic bomb add-on that's not for the faint of heart",
+      "One of the few quality food spots open past midnight"
+    ]
+  },
+  {
+    "name": "La Terrazza",
+    "cuisine": "Italian",
+    "location": "Hilltop",
+    "price": "30-55 USD per person",
+    "latitude": 34.7150,
+    "longitude": 135.4900,
+    "description": "Upscale Italian with panoramic terrace overlooking the valley",
+    "reviews": [
+      "The terrace view at sunset is breathtaking, absolutely worth the drive up the hill",
+      "Their fresh pasta rivals what I had in Florence, the truffle tagliatelle especially",
+      "Wine list is extensive and well-curated, heavy on Tuscan and Piedmont selections",
+      "Perfect for a romantic dinner, we got engaged here",
+      "The osso buco is a showstopper, fall-off-the-bone tender",
+      "Service is warm and personal, the owner comes by every table",
+      "Not cheap but not crazy expensive for the quality and experience"
+    ]
+  }
+]

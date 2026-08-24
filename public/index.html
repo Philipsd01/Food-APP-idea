@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Restaurant Discovery</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="menu-overlay" id="menuOverlay" onclick="closeMenu()"></div>
+
+  <div class="side-menu" id="sideMenu">
+    <div class="menu-header">
+      <span class="menu-title">Menu</span>
+      <button class="menu-close" onclick="closeMenu()">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+
+    <div class="menu-section">
+      <div class="menu-section-label" onclick="toggleSection(this)">
+        <i class="ti ti-user-circle"></i>
+        <span>Account</span>
+        <i class="ti ti-chevron-down section-arrow"></i>
+      </div>
+      <div class="menu-section-items">
+        <div class="menu-item" onclick="closeMenu()">
+          <span>Login / Sign up</span>
+          <i class="ti ti-chevron-right menu-arrow"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="menu-item" onclick="resetSearch(); closeMenu();">
+      <i class="ti ti-refresh"></i>
+      <span>New Search</span>
+    </div>
+
+    <div class="menu-section">
+      <div class="menu-section-label" onclick="toggleSection(this)">
+        <i class="ti ti-history"></i>
+        <span>Search History</span>
+        <i class="ti ti-chevron-down section-arrow"></i>
+      </div>
+      <div class="menu-section-items">
+        <div class="menu-item">
+          <span>No history yet</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="menu-section">
+      <div class="menu-section-label" onclick="toggleSection(this)">
+        <i class="ti ti-heart"></i>
+        <span>Saved Restaurants</span>
+        <i class="ti ti-chevron-down section-arrow"></i>
+      </div>
+      <div class="menu-section-items">
+        <div class="menu-item">
+          <span>No saved restaurants yet</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="menu-section">
+      <div class="menu-section-label" onclick="toggleSection(this)">
+        <i class="ti ti-settings"></i>
+        <span>Settings</span>
+        <i class="ti ti-chevron-down section-arrow"></i>
+      </div>
+      <div class="menu-section-items">
+        <div class="menu-item" onclick="toggleTheme()">
+          <i class="ti ti-moon"></i>
+          <span>Appearance</span>
+          <span class="menu-value" id="themeLabel">Light</span>
+        </div>
+        <div class="menu-item" onclick="closeMenu()">
+          <i class="ti ti-language"></i>
+          <span>Language</span>
+          <span class="menu-value">English</span>
+        </div>
+        <div class="menu-item" onclick="closeMenu()">
+          <i class="ti ti-ruler-measure"></i>
+          <span>Distance Unit</span>
+          <span class="menu-value">km</span>
+        </div>
+        <div class="menu-item" onclick="closeMenu()">
+          <i class="ti ti-list-numbers"></i>
+          <span>Max Results</span>
+          <span class="menu-value">5</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="menu-footer">
+      <div class="menu-item" onclick="closeMenu()">
+        <i class="ti ti-info-circle"></i>
+        <span>About</span>
+      </div>
+      <p class="menu-version">v0.1.0 — Demo</p>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="top-bar">
+      <button class="hamburger" onclick="openMenu()">
+        <i class="ti ti-menu-2"></i>
+      </button>
+    </div>
+
+    <p class="header-label">discover</p>
+    <p class="header-title">Search smarter, eat better</p>
+
+    <div class="analysis" id="analysis"></div>
+
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Describe what you're looking for...">
+      <button class="search-btn" id="searchBtn" onclick="search()">
+        <i class="ti ti-arrow-up"></i>
+      </button>
+    </div>
+
+    <div class="loading" id="loading"></div>
+    <div class="error" id="error">Something went wrong. Try again.</div>
+
+    <div class="view-toggle" id="viewToggle" style="display: none;">
+      <button class="toggle-view-btn active" id="btnList" onclick="switchView('list')">
+        <i class="ti ti-list"></i> List
+      </button>
+      <button class="toggle-view-btn" id="btnMap" onclick="switchView('map')">
+        <i class="ti ti-map"></i> Map
+      </button>
+    </div>
+
+    <div class="results" id="results"></div>
+    <div id="mapView"
+      style="display: none; height: calc(100vh - 280px); min-height: 340px; border-radius: 12px; overflow: hidden; margin-top: 10px;">
+    </div>
+  </div>
+  </div>
+
+  <script>
+    let currentQuery = "";
+    let userLatitude = null;
+    let userLongitude = null;
+    let map = null;
+    let tileLayer = null;
+    let markers = [];
+    let currentResults = [];
+    let isLoading = false;
+    let lastQuery = "";
+    let tagSlots = {};
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => { userLatitude = pos.coords.latitude; userLongitude = pos.coords.longitude; },
+        () => { }
+      );
+    }
+
+    const searchInput = document.getElementById("searchInput");
+    const loading = document.getElementById("loading");
+    const error = document.getElementById("error");
+    const analysisBox = document.getElementById("analysis");
+    const resultsBox = document.getElementById("results");
+
+    searchInput.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+
+    function scoreLabel(score) {
+      if (score >= 80) return "strong match";
+      if (score >= 50) return "worth a look";
+      return "stretch pick";
+    }
+
+    function scoreHint(score) {
+      if (score >= 80) return "";
+      if (score >= 50) return "limited data or partial match";
+      return "low confidence";
+    }
+
+    function makePopupHtml(r, index) {
+      const scoreClass = r.score >= 80 ? 'high' : r.score >= 50 ? 'medium' : 'low';
+      const meta = [r.tags?.cuisine, r.distance_km ? r.distance_km + ' km' : null].filter(Boolean).join(' · ');
+      return `
+        <div class="map-popup">
+          <div class="map-popup-header">
+            <span class="map-popup-name">${r.name}</span>
+            <span class="map-popup-dot ${scoreClass}"></span>
+          </div>
+          <div class="map-popup-meta">${meta}</div>
+          <div class="map-popup-divider"></div>
+          <div class="map-popup-summary">${r.summary}</div>
+          ${r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown' ? `<div class="map-popup-price">${r.tags.price}</div>` : ''}
+          <div class="map-popup-footer">
+            <button class="map-popup-list-btn" onclick="focusOnList(${index})">View in list</button>
+          </div>
+        </div>`;
+    }
+
+    async function search() {
+      const query = searchInput.value.trim();
+      if (!query) return;
+
+      const previousQuery = currentQuery || null;
+
+      resultsBox.innerHTML = "";
+      document.getElementById('viewToggle').style.display = 'none';
+
+      loading.innerHTML = `
+        <div class="skeleton-card">
+          <div class="skeleton-line title"></div>
+          <div class="skeleton-line tags"></div>
+          <div class="skeleton-line text1"></div>
+          <div class="skeleton-line text2"></div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-line title"></div>
+          <div class="skeleton-line tags"></div>
+          <div class="skeleton-line text1"></div>
+          <div class="skeleton-line text2"></div>
+        </div>`;
+
+      const activeView = document.getElementById('btnMap').classList.contains('active') ? 'map' : 'list';
+      isLoading = true;
+      loading.style.display = activeView === 'list' ? "block" : "none";
+
+      if (activeView === 'map') {
+        document.getElementById('mapView').innerHTML = `
+          <div style="height:100%;display:flex;align-items:center;justify-content:center;background:var(--paper-2);border-radius:12px;">
+            <div style="text-align:center;color:var(--ink-3);">
+              <div class="map-spinner"></div>
+              <p style="margin-top:12px;font-size:13px;font-family:'DM Mono',monospace;letter-spacing:0.06em;">Finding restaurants...</p>
+            </div>
+          </div>`;
+        map = null;
+        tileLayer = null;
+        markers = [];
+      }
+
+      error.style.display = "none";
+      searchInput.value = "";
+
+      try {
+        const res = await fetch("/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, previousQuery, latitude: userLatitude, longitude: userLongitude }),
+        });
+
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        if (data.clearedContext) {
+          currentQuery = query;
+        } else {
+          currentQuery = previousQuery ? `${previousQuery}. Also: ${query}` : query;
+        }
+        lastQuery = query;
+
+        const a = data.analysis;
+
+        if (data.clearedContext) {
+          tagSlots = {};
+        }
+
+        if (a.cuisine) tagSlots.cuisine = `<span class="card-tag cuisine">${a.cuisine}</span>`;
+        if (a.dish) tagSlots.dish = `<span class="card-tag cuisine">${a.dish}</span>`;
+        if (a.atmosphere) tagSlots.atmosphere = `<span class="card-tag vibe">${a.atmosphere}</span>`;
+        if (a.location) tagSlots.location = `<span class="card-tag vibe">${a.location}</span>`;
+        if (a.occasion) tagSlots.occasion = `<span class="card-tag audience">${a.occasion}</span>`;
+        if (a.audience) tagSlots.audience = `<span class="card-tag audience">${a.audience}</span>`;
+        if (a.price) tagSlots.price = `<span class="card-tag price">${a.price}</span>`;
+
+        if (a.dish && !a.cuisine) {
+          delete tagSlots.cuisine;
+        }
+
+        const TAG_ORDER = ["cuisine", "dish", "atmosphere", "location", "occasion", "audience", "price"];
+        const tagsHtml = TAG_ORDER.map(k => tagSlots[k] || "").join("");
+
+        analysisBox.innerHTML = `
+          <div class="analysis-title">What I understood</div>
+          <div class="analysis-interpretation">${a.interpretation}</div>
+          <div class="analysis-tags">${tagsHtml}</div>`;
+        analysisBox.style.display = "block";
+        document.getElementById('viewToggle').style.display = 'flex';
+        error.style.display = "none";
+
+        if (data.results.length === 0) {
+          resultsBox.innerHTML = `
+            <div class="no-results">
+              <p>Nothing quite fits what you're looking for</p>
+              <p>Try broadening your search or describing what you want differently</p>
+            </div>`;
+        } else {
+          currentResults = data.results;
+          if (document.getElementById('btnMap').classList.contains('active')) {
+            initMap(currentResults);
+          }
+
+          data.results.forEach((r, index) => {
+            const scoreClass = r.score >= 80 ? "high" : r.score >= 50 ? "medium" : "low";
+            const label = scoreLabel(r.score);
+
+            let cardTagsHtml = "";
+            if (r.tags) {
+              if (r.tags.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${r.tags.cuisine}</span>`;
+              if (r.tags.price) cardTagsHtml += `<span class="card-tag price">${r.tags.price}</span>`;
+              if (r.tags.distance) cardTagsHtml += `<span class="card-tag highlight">${r.tags.distance}</span>`;
+              if (r.open_now === true) cardTagsHtml += `<span class="card-tag open-now">Open now</span>`;
+              if (r.open_now === false) cardTagsHtml += `<span class="card-tag closed-now">Closed</span>`;
+            } else if (r.cuisine) {
+              cardTagsHtml += `<span class="card-tag cuisine">${r.cuisine}</span>`;
+            }
+
+            let evidenceHtml = "";
+            if (r.evidence && r.evidence.length > 0) {
+              evidenceHtml = `<div class="evidence">${r.evidence.map(e =>
+                `<p><span class="evidence-quote">" </span>${e}</p>`
+              ).join("")}</div>`;
+            }
+            resultsBox.innerHTML += `
+              <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="this.classList.toggle('expanded')">
+                <div class="card-header">
+                  <span class="card-name">${r.name}</span>
+                  <span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${scoreHint(r.score)}"` : ''}>${label}</span>
+                </div>
+                <div class="card-tags">${cardTagsHtml}</div>
+                  ${r.score < 80 ? `<p class="card-score-hint">${scoreHint(r.score)}</p>` : ''}
+                <p class="card-summary">${r.summary}</p>
+                ${evidenceHtml}
+                <div class="card-footer">
+                  <button class="card-map-btn" onclick="event.stopPropagation(); focusOnMap(${index})">
+                    <i class="ti ti-map-pin"></i> Show on map
+                  </button>
+                  <div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>
+                </div>
+              </div>`;
+          });
+        }
+
+        searchInput.placeholder = '↳ refine: "but cheaper" or "with outdoor seating"';
+
+      } catch (err) {
+        error.style.display = "block";
+        console.error(err);
+      } finally {
+        isLoading = false;
+        loading.style.display = "none";
+      }
+    }
+
+    function openMenu() {
+      document.getElementById("sideMenu").classList.add("open");
+      document.getElementById("menuOverlay").classList.add("open");
+    }
+
+    function closeMenu() {
+      document.getElementById("sideMenu").classList.remove("open");
+      document.getElementById("menuOverlay").classList.remove("open");
+    }
+
+    function resetSearch() {
+      currentQuery = "";
+      lastQuery = "";
+      tagSlots = {};
+      searchInput.placeholder = "Describe what you're looking for...";
+      analysisBox.style.display = "none";
+      resultsBox.innerHTML = "";
+      document.getElementById('viewToggle').style.display = 'none';
+      error.style.display = "none";
+      document.getElementById('viewToggle').style.display = 'none';
+      searchInput.focus();
+    }
+
+    function toggleSection(label) {
+      label.parentElement.classList.toggle("open");
+    }
+
+    function switchView(view) {
+      const listEl = document.getElementById('results');
+      const mapEl = document.getElementById('mapView');
+      const btnList = document.getElementById('btnList');
+      const btnMap = document.getElementById('btnMap');
+
+      if (view === 'list') {
+        mapEl.style.display = 'none';
+        listEl.style.display = 'flex';
+        btnList.classList.add('active');
+        btnMap.classList.remove('active');
+        if (isLoading) loading.style.display = "block";
+      } else {
+        listEl.style.display = 'none';
+        mapEl.style.display = 'block';
+        btnList.classList.remove('active');
+        btnMap.classList.add('active');
+        document.getElementById('viewToggle').scrollIntoView({ behavior: 'smooth' });
+        setTimeout(() => {
+          map && map.invalidateSize();
+          if (markers.length === 0) initMap(currentResults);
+        }, 100);
+      }
+
+      document.getElementById('viewToggle').style.display = 'flex';
+    }
+
+    function isDarkMode() {
+      return document.body.classList.contains('dark');
+    }
+
+    function getMapTileUrl() {
+      if (isDarkMode()) {
+        return 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+      }
+      return 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+    }
+
+    function makeNumberedPin(number) {
+      const isDark = isDarkMode();
+      const bg = isDark ? '#211C17' : '#FFFFFF';
+      const border = isDark ? '#E07A3E' : '#8B3A1F';
+      const text = isDark ? '#F4EFE3' : '#1A1715';
+
+      return L.divIcon({
+        className: '',
+        html: `
+          <div style="
+            width: 26px;
+            height: 26px;
+            background: ${bg};
+            border-radius: 50%;
+            border: 1.5px solid ${border};
+            box-shadow: 0 1px 6px rgba(0,0,0,${isDark ? '0.5' : '0.15'});
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 11px;
+            font-weight: 400;
+            color: ${text};
+            line-height: 1;
+          ">${number}</div>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+        popupAnchor: [0, -16]
+      });
+    }
+
+    function initMap(results) {
+      const mapEl = document.getElementById('mapView');
+
+      if (!map) {
+        map = L.map(mapEl, { zoomControl: false }).setView([34.6687, 135.5014], 15);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+      } else {
+        markers.forEach(m => m.remove());
+        markers = [];
+        if (results.length > 0 && results[0].latitude) {
+          map.setView([results[0].latitude, results[0].longitude], 15);
+        }
+      }
+
+      if (tileLayer) {
+        map.removeLayer(tileLayer);
+      }
+      tileLayer = L.tileLayer(getMapTileUrl(), {
+        attribution: '© OpenStreetMap © CARTO',
+        maxZoom: 19
+      }).addTo(map);
+
+      results.forEach((r, index) => {
+        if (!r.latitude || !r.longitude) return;
+        const marker = L.marker([r.latitude, r.longitude], {
+          icon: makeNumberedPin(index + 1)
+        })
+          .addTo(map)
+          .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' });
+        markers.push(marker);
+      });
+    }
+
+    function focusOnList(index) {
+      switchView('list');
+      setTimeout(() => {
+        document.querySelectorAll('.card.highlighted')
+          .forEach(c => c.classList.remove('highlighted'));
+        const cards = document.querySelectorAll('.card');
+        if (cards[index]) {
+          cards[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          cards[index].classList.add('highlighted');
+        }
+      }, 100);
+    }
+
+    function focusOnMap(index) {
+      const r = currentResults[index];
+      if (!r || !r.latitude || !r.longitude) return;
+
+      switchView('map');
+
+      setTimeout(() => {
+        map.invalidateSize();
+        map.setView([r.latitude, r.longitude], 17, { animate: false });
+
+        const marker = markers[index];
+        if (marker) {
+          marker.openPopup();
+          setTimeout(() => {
+            const popupEl = document.querySelector('.leaflet-popup');
+            if (popupEl) {
+              const popupHeight = popupEl.offsetHeight;
+              map.panBy([0, -(popupHeight / 2 + 20)], { animate: true });
+            }
+          }, 50);
+        }
+      }, 250);
+    }
+
+    function toggleTheme() {
+      document.body.classList.toggle("dark");
+      const isDark = document.body.classList.contains("dark");
+      localStorage.setItem("theme", isDark ? "dark" : "light");
+      document.getElementById("themeLabel").textContent = isDark ? "Dark" : "Light";
+
+      if (map && tileLayer) {
+        map.removeLayer(tileLayer);
+        tileLayer = L.tileLayer(getMapTileUrl(), {
+          attribution: '© OpenStreetMap © CARTO',
+          maxZoom: 19
+        }).addTo(map);
+
+        markers.forEach(m => m.remove());
+        markers = [];
+        currentResults.forEach((r, index) => {
+          if (!r.latitude || !r.longitude) return;
+          const marker = L.marker([r.latitude, r.longitude], {
+            icon: makeNumberedPin(index + 1)
+          })
+            .addTo(map)
+            .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' });
+          markers.push(marker);
+        });
+      }
+    }
+
+    const saved = localStorage.getItem("theme");
+    if (saved === "dark") {
+      document.body.classList.add("dark");
+      document.getElementById("themeLabel").textContent = "Dark";
+    }
+  </script>
+</body>
+
+</html>
