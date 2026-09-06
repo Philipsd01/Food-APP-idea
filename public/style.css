@@ -964,7 +964,13 @@ body.dark .no-results {
     border-color: var(--border);
 }
 
-/* ── Map tile overrides — handled via JS tile URL ── */
+/* ── Map tiles are plain OpenStreetMap (no dark variant available without an
+   API key), so dark mode is faked with a CSS filter on the tile pane only —
+   markers and popups live in separate Leaflet panes and stay unaffected. ── */
+body.dark .leaflet-tile-pane {
+    filter: invert(92%) hue-rotate(180deg) brightness(0.95) contrast(0.9);
+}
+
 /* Leaflet popup in dark */
 body.dark .leaflet-popup-content-wrapper {
     background: var(--card-bg);

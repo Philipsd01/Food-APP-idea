@@ -455,11 +455,12 @@
       return document.body.classList.contains('dark');
     }
 
+    // CARTO's basemap tiles now require a registered API key, which showed up
+    // as an "API KEY REQUIRED" watermark on every tile. Plain OpenStreetMap
+    // tiles need no key; dark mode is done with a CSS filter (see style.css)
+    // instead of a separate dark tile set.
     function getMapTileUrl() {
-      if (isDarkMode()) {
-        return 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-      }
-      return 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+      return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
     }
 
     function makeNumberedPin(number) {
@@ -511,7 +512,7 @@
         map.removeLayer(tileLayer);
       }
       tileLayer = L.tileLayer(getMapTileUrl(), {
-        attribution: '© OpenStreetMap © CARTO',
+        attribution: '© OpenStreetMap contributors',
         maxZoom: 19
       }).addTo(map);
 
@@ -572,7 +573,7 @@
       if (map && tileLayer) {
         map.removeLayer(tileLayer);
         tileLayer = L.tileLayer(getMapTileUrl(), {
-          attribution: '© OpenStreetMap © CARTO',
+          attribution: '© OpenStreetMap contributors',
           maxZoom: 19
         }).addTo(map);
 

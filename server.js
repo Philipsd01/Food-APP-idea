@@ -36,6 +36,24 @@ function parsePriceCeiling(priceStr) {
   return null;
 }
 
+const PROXIMITY_SPEED_KMH = { walking: 5, biking: 15, driving: 25 };
+const PROXIMITY_DEFAULT_MINUTES = { walking: 15, biking: 15, driving: 10 };
+const DEFAULT_RADIUS_KM = 5;
+
+// Converts a parsed proximity intent ("walking distance", "10 min bike ride", etc.)
+// into an actual search radius. Claude only classifies mode/minutes from the query
+// text — the km math is done here so it's exact rather than model best-effort.
+function computeRadiusKm(proximity) {
+  if (!proximity || (!proximity.mode && !proximity.minutes)) {
+    return DEFAULT_RADIUS_KM;
+  }
+  const mode = proximity.mode || "walking";
+  const speed = PROXIMITY_SPEED_KMH[mode] || PROXIMITY_SPEED_KMH.walking;
+  const minutes = proximity.minutes || PROXIMITY_DEFAULT_MINUTES[mode] || PROXIMITY_DEFAULT_MINUTES.walking;
+  const km = (minutes / 60) * speed;
+  return Math.min(Math.max(Math.round(km * 10) / 10, 0.3), 20);
+}
+
 function getDistanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -90,7 +108,7 @@ function extractText(response, label) {
   return textBlock.text;
 }
 
-async function fetchFromGoogle(query, analysis, userLat, userLng) {
+async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
   const lat = userLat || DEFAULT_LAT;
   const lng = userLng || DEFAULT_LNG;
 
@@ -132,7 +150,7 @@ async function fetchFromGoogle(query, analysis, userLat, userLng) {
     const params = {
       query: googleQuery,
       location: `${lat},${lng}`,
-      radius: 5000,
+      radius: Math.round(radiusKm * 1000),
       language: "en",
       key: GOOGLE_API_KEY,
     };
@@ -215,6 +233,15 @@ CUISINE RULES:
 ATMOSPHERE RULES:
 - "quiet", "relaxed", "peaceful", "chill", "unwind", "low-key" mean LOW NOISE and CASUAL PACE — NOT upscale, NOT omakase, NOT formal. Only use "upscale" or "fine dining" atmosphere if the user explicitly says those words.
 
+PROXIMITY RULES:
+- Detect how close the user wants results and by what mode of travel, if stated.
+- "near me", "close by", "nearby" with no travel mode mentioned → mode: null, minutes: null.
+- "walking distance", "short walk", "walkable" → mode: "walking", minutes: null (or the stated number, e.g. "10 minute walk" → minutes: 10).
+- "bike distance", "biking distance", "bike ride" → mode: "biking", minutes: null or the stated number.
+- "X minutes/mins away" with no mode stated → mode: null, minutes: X.
+- "X minute drive", "driving distance" → mode: "driving", minutes: X or null.
+- If the query says nothing at all about proximity or travel time, set "proximity" to null entirely (not an object).
+
 Respond ONLY with a valid JSON object. No comments, no extra text, no markdown:
 {
   "cuisine": "specific cuisine, 'Japanese or Italian', or null",
@@ -226,6 +253,7 @@ Respond ONLY with a valid JSON object. No comments, no extra text, no markdown:
   "location": "specific sub-area or landmark within the city (e.g. Dotonbori, Shinsaibashi, Umeda) — NOT the city name itself. Null if no specific area mentioned.",  "priority": "the single most important thing in this query",
   "must_not": ["things explicitly NOT wanted — empty array if none"],
   "time_sensitive": true or false — true if query implies immediacy (tonight, now, hungry, for dinner, want to go). false for research/planning queries,
+  "proximity": {"mode": "walking, biking, driving, or null", "minutes": "number or null"} or null if no proximity/travel-time cue at all,
 "interpretation": "One sentence describing what the user wants right now, as if speaking directly about their goal. Never mention 'pivot', 'refine', 'previous search', or any meta language. Just describe the desired outcome.",  "intent": ${previousQuery ? `"refine", "pivot", or "new"` : `"new"`}
 }`,
     }],
@@ -238,7 +266,7 @@ Respond ONLY with a valid JSON object. No comments, no extra text, no markdown:
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-async function searchRestaurants(userQuery, analysis, restaurantData) {
+async function searchRestaurants(userQuery, analysis, restaurantData, radiusKm) {
   const priceCeiling = parsePriceCeiling(analysis.price);
   let filteredData = restaurantData;
   if (priceCeiling !== null && priceCeiling < 4) {
@@ -272,7 +300,7 @@ SCORING RULES:
 - If the user said "Japanese or Italian", both cuisines are equally valid — return a balanced mix, do NOT favour one over the other.
 - If a specific dish was requested (e.g. wagyu, ramen), heavily weight restaurants likely to serve that dish.
 - If a specific brand or chain was requested (e.g. Starbucks, McDonald's), the ONLY criteria is whether the restaurant name matches that brand. Score any matching location 90+. Ignore cuisine scoring entirely for brand searches.
-- Factor in distance_km: under 1 km = great, under 3 km = good, under 5 km = acceptable.
+- Factor in distance_km: under ${radiusKm} km = great, under ${Math.round(radiusKm * 2 * 10) / 10} km = good, under ${Math.round(radiusKm * 3 * 10) / 10} km = acceptable.
 - If a specific location or landmark was requested, prioritise restaurants closest to it.
 - "must_not" items are HARD DISQUALIFIERS — score below 20 if matched.
 - ATMOSPHERE: "quiet", "relaxed", "peaceful", "chill", "unwind", "low-key" mean LOW NOISE and CASUAL PACE. If atmosphere contains any of these words, HARD PENALISE omakase, counter dining, fine dining, and formal restaurants — score them below 40 regardless of rating. A neighbourhood izakaya or casual ramen shop should outscore a Michelin-starred counter.
@@ -327,12 +355,15 @@ app.post("/search", async (req, res) => {
     const effectivePrevious = isPivotOrNew ? null : previousQuery;
     const fullQuery = effectivePrevious ? `${effectivePrevious}. Also: ${userQuery}` : userQuery;
 
+    const radiusKm = computeRadiusKm(analysis.proximity);
+    console.log(`Proximity: ${JSON.stringify(analysis.proximity)} → radius ${radiusKm} km`);
+
     console.log("Fetching from Google Places...");
-    const restaurantData = await fetchFromGoogle(fullQuery, analysis, userLat, userLon);
+    const restaurantData = await fetchFromGoogle(fullQuery, analysis, userLat, userLon, radiusKm);
     console.log(`Got ${restaurantData.length} restaurants from Google`);
 
     console.log("Calling searchRestaurants...");
-    const results = await searchRestaurants(fullQuery, analysis, restaurantData);
+    const results = await searchRestaurants(fullQuery, analysis, restaurantData, radiusKm);
 
     results.forEach(r => {
       const match = restaurantData.find(d => d.name === r.name);
