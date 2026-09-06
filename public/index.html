@@ -156,11 +156,38 @@
     let lastQuery = "";
     let tagSlots = {};
 
-    if (navigator.geolocation) {
+    // Try the browser's real GPS first; if it's denied, blocked, or times out
+    // (common in DevTools device emulation or when OS location services are
+    // off), fall back to a rough IP-based location so search still works.
+    const locationReady = new Promise((resolve) => {
+      if (!navigator.geolocation) { resolve(false); return; }
       navigator.geolocation.getCurrentPosition(
-        (pos) => { userLatitude = pos.coords.latitude; userLongitude = pos.coords.longitude; },
-        () => { }
+        (pos) => {
+          userLatitude = pos.coords.latitude;
+          userLongitude = pos.coords.longitude;
+          resolve(true);
+        },
+        () => resolve(false),
+        { timeout: 5000 }
       );
+    });
+
+    let usedApproximateLocation = false;
+
+    async function ensureLocation() {
+      if (userLatitude != null && userLongitude != null) return true;
+      if (await locationReady) return true;
+      try {
+        const res = await fetch("https://ipapi.co/json/");
+        const data = await res.json();
+        if (data.latitude && data.longitude) {
+          userLatitude = data.latitude;
+          userLongitude = data.longitude;
+          usedApproximateLocation = true;
+          return true;
+        }
+      } catch (e) { /* ignore, handled by caller */ }
+      return false;
     }
 
     const searchInput = document.getElementById("searchInput");
@@ -230,6 +257,10 @@
       loading.style.display = activeView === 'list' ? "block" : "none";
 
       if (activeView === 'map') {
+        // Leaflet marks its container element internally when a map is created there.
+        // Wiping the container's HTML without calling map.remove() first leaves that
+        // marker in place, so the next L.map() call on it throws "already initialized".
+        if (map) { map.remove(); }
         document.getElementById('mapView').innerHTML = `
           <div style="height:100%;display:flex;align-items:center;justify-content:center;background:var(--paper-2);border-radius:12px;">
             <div style="text-align:center;color:var(--ink-3);">
@@ -246,6 +277,11 @@
       searchInput.value = "";
 
       try {
+        const gotLocation = await ensureLocation();
+        if (!gotLocation) {
+          throw new Error("Couldn't determine your location. Please allow location access in your browser and try again.");
+        }
+
         const res = await fetch("/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -283,8 +319,13 @@
         const TAG_ORDER = ["cuisine", "dish", "atmosphere", "location", "occasion", "audience", "price"];
         const tagsHtml = TAG_ORDER.map(k => tagSlots[k] || "").join("");
 
+        const locationWarningHtml = usedApproximateLocation
+          ? `<div class="analysis-interpretation" style="color:#a45c28;">⚠ Using an approximate location from your network, not your device's GPS — results may be centered on the wrong area. Allow location access in your browser for accurate results.</div>`
+          : "";
+
         analysisBox.innerHTML = `
           <div class="analysis-title">What I understood</div>
+          ${locationWarningHtml}
           <div class="analysis-interpretation">${a.interpretation}</div>
           <div class="analysis-tags">${tagsHtml}</div>`;
         analysisBox.style.display = "block";
@@ -347,6 +388,7 @@
         searchInput.placeholder = '↳ refine: "but cheaper" or "with outdoor seating"';
 
       } catch (err) {
+        error.textContent = err.message || "Something went wrong. Try again.";
         error.style.display = "block";
         console.error(err);
       } finally {

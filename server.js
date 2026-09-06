@@ -251,9 +251,9 @@ async function searchRestaurants(userQuery, analysis, restaurantData) {
 
   const response = await client.messages.create({
     model: "claude-sonnet-5",
-    max_tokens: 4096, // raised from 2000 — Sonnet 5's tokenizer uses more tokens per
-                       // response than older models, and 20 scored restaurant entries
-                       // plus evidence/tags was very likely getting truncated at 2000.
+    max_tokens: 8192, // raised from 4096 — 4096 still truncated mid-response for
+                       // broad queries where most/all 20 restaurants score above 30
+                       // and each gets a full summary/evidence/tags object.
     messages: [{
       role: "user",
       content: `You are a restaurant discovery AI.
@@ -279,6 +279,7 @@ SCORING RULES:
 - Use Google rating and review count as quality signals but do not let high ratings override a wrong vibe.
 - Price has already been pre-filtered — do not penalise any restaurant in this list for price.
 - Only return restaurants that genuinely match. Return [] if nothing scores above 30.
+- Return at most 15 restaurants — the highest-scoring ones — even if more qualify.
 
 Respond ONLY with a JSON array, no other text:
 [
@@ -382,7 +383,7 @@ app.post("/search", async (req, res) => {
 
   } catch (error) {
     console.error("Error:", error.message);
-    res.status(500).json({ error: "Something went wrong" });
+    res.status(500).json({ error: error.message || "Something went wrong" });
   }
 });
 
