@@ -38,14 +38,18 @@ function parsePriceCeiling(priceStr) {
 
 const PROXIMITY_SPEED_KMH = { walking: 5, biking: 15, driving: 25 };
 const PROXIMITY_DEFAULT_MINUTES = { walking: 15, biking: 15, driving: 10 };
-const DEFAULT_RADIUS_KM = 5;
+const DEFAULT_RADIUS_KM = 5; // nothing said about proximity at all
+const NEAR_ME_RADIUS_KM = 1.5; // "near me" / "close by" said explicitly, but no mode or time given
 
 // Converts a parsed proximity intent ("walking distance", "10 min bike ride", etc.)
 // into an actual search radius. Claude only classifies mode/minutes from the query
 // text — the km math is done here so it's exact rather than model best-effort.
 function computeRadiusKm(proximity) {
-  if (!proximity || (!proximity.mode && !proximity.minutes)) {
+  if (!proximity) {
     return DEFAULT_RADIUS_KM;
+  }
+  if (!proximity.mode && !proximity.minutes) {
+    return NEAR_ME_RADIUS_KM;
   }
   const mode = proximity.mode || "walking";
   const speed = PROXIMITY_SPEED_KMH[mode] || PROXIMITY_SPEED_KMH.walking;
@@ -174,6 +178,11 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
       const placeLat = place.geometry?.location?.lat;
       const placeLng = place.geometry?.location?.lng;
       const distance = placeLat && placeLng ? getDistanceKm(lat, lng, placeLat, placeLng) : null;
+
+      // Google's Text Search API treats radius/location as a ranking bias, not a
+      // hard filter — it can still return places well outside it if they match
+      // the query text strongly. Enforce the requested radius ourselves.
+      if (distance !== null && distance > radiusKm) continue;
 
       allPlaces.set(place.name, {
         name: place.name,
@@ -308,14 +317,15 @@ SCORING RULES:
 - Price has already been pre-filtered — do not penalise any restaurant in this list for price.
 - Only return restaurants that genuinely match. Return [] if nothing scores above 30.
 - Return at most 15 restaurants — the highest-scoring ones — even if more qualify.
+- Distance is already shown to the user as its own tag — do NOT mention distance, km, or "away" in "summary" or "evidence". Use that space to talk about the restaurant itself: cuisine, dish, atmosphere, rating, reviews, why it fits.
 
 Respond ONLY with a JSON array, no other text:
 [
   {
     "name": "Restaurant Name",
     "score": 92,
-    "summary": "Why this matched (1-2 sentences, specific)",
-    "evidence": ["evidence from description or reviews"],
+    "summary": "Why this matched (1-2 sentences, specific, no distance/km mentions)",
+    "evidence": ["evidence from description or reviews, no distance/km mentions"],
     "confidence": "high, medium, or low",
     "tags": {
       "cuisine": "Italian",
