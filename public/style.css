@@ -394,6 +394,32 @@ body.dark .view-toggle {
     gap: 10px;
 }
 
+.card-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.save-heart-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--ink-3);
+    font-size: 15px;
+    transition: color 0.2s, transform 0.15s;
+}
+
+.save-heart-btn:active {
+    transform: scale(0.9);
+}
+
+.save-heart-btn.saved {
+    color: var(--ember);
+}
+
 .card-name {
     font-family: var(--serif);
     font-size: 16px;
@@ -725,6 +751,36 @@ body.dark .view-toggle {
 
 .menu-section-items .menu-item {
     padding-left: 44px;
+}
+
+.menu-section-items .menu-item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.saved-restaurant-item {
+    justify-content: space-between;
+    padding-right: 16px;
+}
+
+.saved-restaurant-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.saved-restaurant-item i {
+    flex-shrink: 0;
+    color: var(--ink-3);
+    cursor: pointer;
+    padding: 4px;
+}
+
+.saved-restaurant-item i:hover {
+    color: var(--ember);
 }
 
 .menu-item {

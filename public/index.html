@@ -65,7 +65,7 @@
         <span>Search History</span>
         <i class="ti ti-chevron-down section-arrow"></i>
       </div>
-      <div class="menu-section-items">
+      <div class="menu-section-items" id="searchHistoryList">
         <div class="menu-item">
           <span>No history yet</span>
         </div>
@@ -78,7 +78,7 @@
         <span>Saved Restaurants</span>
         <i class="ti ti-chevron-down section-arrow"></i>
       </div>
-      <div class="menu-section-items">
+      <div class="menu-section-items" id="savedRestaurantsList">
         <div class="menu-item">
           <span>No saved restaurants yet</span>
         </div>
@@ -575,12 +575,20 @@
         // an address in the query.
         actionsHtml += `<a class="card-map-btn" href="https://www.google.com/search?q=${encodeURIComponent(r.name + " menu")}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-book-2"></i> Menu</a>`;
 
+        const escapedName = r.name.replace(/'/g, "\\'");
+        const isSaved = isRestaurantSaved(r.name);
+
         resultsBox.innerHTML += `
           <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="this.classList.toggle('expanded')">
             ${photoHtml}
             <div class="card-header">
               <span class="card-name">${r.name}</span>
-              <span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${scoreHint(r.score)}"` : ''}>${label}</span>
+              <div class="card-header-right">
+                <button class="save-heart-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveRestaurant('${escapedName}', this)" title="${isSaved ? 'Remove from saved' : 'Save'}">
+                  <i class="ti ti-heart${isSaved ? '-filled' : ''}"></i>
+                </button>
+                <span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${scoreHint(r.score)}"` : ''}>${label}</span>
+              </div>
             </div>
             <div class="card-tags">${cardTagsHtml}</div>
               ${r.score < 80 ? `<p class="card-score-hint">${scoreHint(r.score)}</p>` : ''}
@@ -685,6 +693,7 @@
 
         currentAnalysis = data.analysis;
         if (query) lastQuery = query;
+        recordSearchHistory(data.analysis);
 
         const a = data.analysis;
         const tagsHtml = renderTags(a);
@@ -742,6 +751,135 @@
 
     function toggleSection(label) {
       label.parentElement.classList.toggle("open");
+    }
+
+    // --- Search History (localStorage only — no accounts/backend needed for a POC) ---
+
+    const SEARCH_HISTORY_KEY = "searchHistory";
+    const MAX_HISTORY_ITEMS = 20;
+
+    function loadSearchHistory() {
+      try {
+        return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || "[]");
+      } catch (e) {
+        return [];
+      }
+    }
+
+    // A history "entry" represents one evolving conversation thread, not one
+    // message — a fresh ("new"/"pivot") search starts a new entry; a "refine"
+    // continuation updates the most recent entry in place. Otherwise every
+    // incremental refinement ("a bit cheaper", "no seafood") would pile up as
+    // its own meaningless row instead of the thread just showing where it
+    // ended up. Stores the full analysis object (not just typed text) so
+    // resuming it later can restore the whole accumulated state — cuisine,
+    // price, exclusions — via the same directAnalysis path tag-removal uses,
+    // rather than re-classifying from scratch and losing all of that.
+    function recordSearchHistory(analysis) {
+      if (!analysis || !analysis.interpretation) return;
+      const history = loadSearchHistory();
+      const isContinuation = analysis.intent === "refine" && history.length > 0;
+      console.log(`recordSearchHistory: intent="${analysis.intent}" isContinuation=${isContinuation} historyLenBefore=${history.length}`);
+      const entry = { label: analysis.interpretation, analysis, timestamp: Date.now() };
+
+      if (isContinuation) {
+        history[0] = entry;
+      } else {
+        if (history.length > 0 && history[0].label === entry.label) return; // skip exact dupes
+        history.unshift(entry);
+      }
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)));
+      renderSearchHistory();
+    }
+
+    function renderSearchHistory() {
+      const container = document.getElementById("searchHistoryList");
+      if (!container) return;
+      const history = loadSearchHistory();
+      if (history.length === 0) {
+        container.innerHTML = `<div class="menu-item"><span>No history yet</span></div>`;
+        return;
+      }
+      container.innerHTML = history.map((h, i) =>
+        `<div class="menu-item" onclick="rerunHistoryEntry(${i})">
+          <span>${h.label}</span>
+        </div>`
+      ).join("") + `<div class="menu-item" onclick="clearSearchHistory()"><span style="color: var(--ember);">Clear history</span></div>`;
+    }
+
+    function rerunHistoryEntry(index) {
+      const history = loadSearchHistory();
+      const entry = history[index];
+      if (!entry) return;
+      resetSearch();
+      closeMenu();
+      search(entry.analysis);
+    }
+
+    function clearSearchHistory() {
+      localStorage.removeItem(SEARCH_HISTORY_KEY);
+      renderSearchHistory();
+    }
+
+    // --- Saved Restaurants (localStorage only, same reasoning as history) ---
+
+    const SAVED_RESTAURANTS_KEY = "savedRestaurants";
+
+    function loadSavedRestaurants() {
+      try {
+        return JSON.parse(localStorage.getItem(SAVED_RESTAURANTS_KEY) || "[]");
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function isRestaurantSaved(name) {
+      return loadSavedRestaurants().some(r => r.name === name);
+    }
+
+    // Stores the full result object so the saved list has enough to act on
+    // (directions, website) without needing the original search around —
+    // note distance_km/open_now are frozen at save time and can go stale.
+    function toggleSaveRestaurant(name, btnEl) {
+      let saved = loadSavedRestaurants();
+      const idx = saved.findIndex(s => s.name === name);
+      const nowSaved = idx < 0;
+      if (idx >= 0) {
+        saved.splice(idx, 1);
+      } else {
+        const r = currentResults.find(x => x.name === name);
+        if (r) saved.unshift({ ...r, savedAt: Date.now() });
+      }
+      localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(saved));
+      btnEl.classList.toggle("saved", nowSaved);
+      btnEl.querySelector("i").className = nowSaved ? "ti ti-heart-filled" : "ti ti-heart";
+      renderSavedRestaurantsMenu();
+    }
+
+    function unsaveRestaurant(name) {
+      const saved = loadSavedRestaurants().filter(s => s.name !== name);
+      localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(saved));
+      renderSavedRestaurantsMenu();
+      renderResults(currentResults); // keep any visible save buttons in sync
+    }
+
+    function renderSavedRestaurantsMenu() {
+      const container = document.getElementById("savedRestaurantsList");
+      if (!container) return;
+      const saved = loadSavedRestaurants();
+      if (saved.length === 0) {
+        container.innerHTML = `<div class="menu-item"><span>No saved restaurants yet</span></div>`;
+        return;
+      }
+      container.innerHTML = saved.map(r => {
+        const escapedName = r.name.replace(/'/g, "\\'");
+        const hasCoords = r.latitude && r.longitude;
+        return `
+        <div class="menu-item saved-restaurant-item">
+          <span class="saved-restaurant-name" ${hasCoords ? `onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}', '_blank')"` : ''}>${r.name}</span>
+          <i class="ti ti-x" onclick="event.stopPropagation(); unsaveRestaurant('${escapedName}')"></i>
+        </div>`;
+      }).join("");
     }
 
     function switchView(view) {
@@ -934,6 +1072,8 @@
 
     document.getElementById("distanceUnitLabel").textContent = distanceUnit;
     document.getElementById("maxResultsLabel").textContent = maxResults;
+    renderSearchHistory();
+    renderSavedRestaurantsMenu();
   </script>
 </body>
 
