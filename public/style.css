@@ -243,6 +243,23 @@ body.dark .view-toggle {
     opacity: 0.7;
 }
 
+/* Constraint tags in the "What I understood" panel are removable — clicking
+   drops that constraint and re-runs the search. */
+.removable-tag {
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.removable-tag:hover {
+    opacity: 0.65;
+}
+
+.removable-tag i {
+    margin-left: 3px;
+    font-size: 9px;
+    opacity: 0.7;
+}
+
 /* ── Search box ── */
 .search-box {
     display: flex;

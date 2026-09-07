@@ -145,7 +145,11 @@
   </div>
 
   <script>
-    let currentQuery = "";
+    // The server is the source of truth for accumulated search state across
+    // turns — it merges each turn's newly-extracted fields onto this object
+    // (see mergeAnalysis in server.js) rather than the client re-deriving it
+    // from a growing string of concatenated queries.
+    let currentAnalysis = null;
     let userLatitude = null;
     let userLongitude = null;
     let map = null;
@@ -154,7 +158,6 @@
     let currentResults = [];
     let isLoading = false;
     let lastQuery = "";
-    let tagSlots = {};
 
     // Try the browser's real GPS first; if it's denied, blocked, or times out
     // (common in DevTools device emulation or when OS location services are
@@ -229,11 +232,64 @@
         </div>`;
     }
 
-    async function search() {
-      const query = searchInput.value.trim();
-      if (!query) return;
+    const TAG_FIELDS = [
+      { field: "cuisine", cls: "cuisine" },
+      { field: "dish", cls: "cuisine" },
+      { field: "atmosphere", cls: "vibe" },
+      { field: "location", cls: "vibe" },
+      { field: "occasion", cls: "audience" },
+      { field: "audience", cls: "audience" },
+      { field: "price", cls: "price" },
+    ];
 
-      const previousQuery = currentQuery || null;
+    // Renders the merged analysis as clickable pills — clicking one drops
+    // that constraint and re-runs the search, instead of the old read-only
+    // badges that only ever grew and never showed how to walk something back.
+    function renderTags(a) {
+      const constraintTags = TAG_FIELDS
+        .filter(t => a[t.field])
+        .map(t => `<span class="card-tag ${t.cls} removable-tag" onclick="removeConstraint('${t.field}')" title="Remove">${a[t.field]} <i class="ti ti-x"></i></span>`)
+        .join("");
+
+      const mustNotTags = (a.must_not || [])
+        .map(item => `<span class="card-tag excluded removable-tag" onclick="removeMustNot('${item.replace(/'/g, "\\'")}')" title="Remove">no ${item} <i class="ti ti-x"></i></span>`)
+        .join("");
+
+      return constraintTags + mustNotTags;
+    }
+
+    // Removing a tag is a decision the user already made by clicking it —
+    // reflect that instantly instead of waiting on the round-trip. The
+    // interpretation sentence and results still catch up once search()
+    // resolves; only the tag row itself updates optimistically here.
+    function applyOptimisticTags(updated) {
+      currentAnalysis = updated;
+      const tagsEl = analysisBox.querySelector('.analysis-tags');
+      if (tagsEl) tagsEl.innerHTML = renderTags(updated);
+    }
+
+    function removeConstraint(field) {
+      if (!currentAnalysis) return;
+      const updated = { ...currentAnalysis, [field]: null };
+      applyOptimisticTags(updated);
+      search(updated);
+    }
+
+    function removeMustNot(item) {
+      if (!currentAnalysis) return;
+      const updated = { ...currentAnalysis, must_not: currentAnalysis.must_not.filter(m => m !== item) };
+      applyOptimisticTags(updated);
+      search(updated);
+    }
+
+    async function search(directAnalysis) {
+      const query = directAnalysis ? "" : searchInput.value.trim();
+      if (!directAnalysis && !query) return;
+
+      // Only the immediately preceding message is needed here — analyzeQuery
+      // uses it purely to detect refine/pivot/new signals ("but", "actually",
+      // "forget that"), not to reconstruct the full conversation.
+      const previousQuery = lastQuery || null;
 
       resultsBox.innerHTML = "";
       document.getElementById('viewToggle').style.display = 'none';
@@ -285,39 +341,20 @@
         const res = await fetch("/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, previousQuery, latitude: userLatitude, longitude: userLongitude }),
+          body: JSON.stringify({
+            query, previousQuery, previousAnalysis: currentAnalysis, directAnalysis,
+            latitude: userLatitude, longitude: userLongitude,
+          }),
         });
 
         const data = await res.json();
         if (data.error) throw new Error(data.error);
 
-        if (data.clearedContext) {
-          currentQuery = query;
-        } else {
-          currentQuery = previousQuery ? `${previousQuery}. Also: ${query}` : query;
-        }
-        lastQuery = query;
+        currentAnalysis = data.analysis;
+        if (query) lastQuery = query;
 
         const a = data.analysis;
-
-        if (data.clearedContext) {
-          tagSlots = {};
-        }
-
-        if (a.cuisine) tagSlots.cuisine = `<span class="card-tag cuisine">${a.cuisine}</span>`;
-        if (a.dish) tagSlots.dish = `<span class="card-tag cuisine">${a.dish}</span>`;
-        if (a.atmosphere) tagSlots.atmosphere = `<span class="card-tag vibe">${a.atmosphere}</span>`;
-        if (a.location) tagSlots.location = `<span class="card-tag vibe">${a.location}</span>`;
-        if (a.occasion) tagSlots.occasion = `<span class="card-tag audience">${a.occasion}</span>`;
-        if (a.audience) tagSlots.audience = `<span class="card-tag audience">${a.audience}</span>`;
-        if (a.price) tagSlots.price = `<span class="card-tag price">${a.price}</span>`;
-
-        if (a.dish && !a.cuisine) {
-          delete tagSlots.cuisine;
-        }
-
-        const TAG_ORDER = ["cuisine", "dish", "atmosphere", "location", "occasion", "audience", "price"];
-        const tagsHtml = TAG_ORDER.map(k => tagSlots[k] || "").join("");
+        const tagsHtml = renderTags(a);
 
         const locationWarningHtml = usedApproximateLocation
           ? `<div class="analysis-interpretation" style="color:#a45c28;">⚠ Using an approximate location from your network, not your device's GPS — results may be centered on the wrong area. Allow location access in your browser for accurate results.</div>`
@@ -408,9 +445,8 @@
     }
 
     function resetSearch() {
-      currentQuery = "";
+      currentAnalysis = null;
       lastQuery = "";
-      tagSlots = {};
       searchInput.placeholder = "Describe what you're looking for...";
       analysisBox.style.display = "none";
       resultsBox.innerHTML = "";

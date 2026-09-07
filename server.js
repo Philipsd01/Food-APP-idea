@@ -311,14 +311,95 @@ Respond ONLY with a valid JSON object. No comments, no extra text, no markdown:
   return JSON.parse(raw.slice(start, end + 1));
 }
 
+// Used only after a tag removal (see the `directAnalysis` path in /search) —
+// the fields are already known, so this just re-phrases the "What I
+// understood" sentence to match them, without paying for a full
+// re-classification call.
+async function regenerateInterpretation(analysis) {
+  const response = await client.messages.create({
+    model: "claude-haiku-4-5",
+    max_tokens: 100,
+    messages: [{
+      role: "user",
+      content: `Write ONE sentence describing what this restaurant search is looking for right now, based on these fields. Speak directly about the goal, as if describing what the user wants. Never mention field names, "null", JSON, or meta language like "refine"/"pivot"/"intent". Silently skip any field that's null.
+
+${JSON.stringify(analysis, null, 2)}
+
+Respond with ONLY the sentence — no quotes, no markdown, no preamble.`,
+    }],
+  });
+  return extractText(response, "regenerateInterpretation").trim();
+}
+
+const MERGE_FIELDS = ["atmosphere", "occasion", "audience", "price", "location", "proximity"];
+
+// Combines this turn's freshly-extracted fields with the previous turn's
+// merged state. A field only overrides the prior value when the user
+// actually mentioned it this turn (non-null) — otherwise earlier constraints
+// like price or audience survive a pivot, matching what the intent-
+// classification prompt already instructs ("actually I want X" should only
+// pivot cuisine/concept, not silently drop everything else the user said).
+function mergeAnalysis(previousAnalysis, newAnalysis) {
+  if (!previousAnalysis || newAnalysis.intent === "new") {
+    return newAnalysis;
+  }
+
+  const merged = { ...previousAnalysis };
+
+  // Cuisine and dish are mutually exclusive — whichever one was named this
+  // turn wins and clears the other; if neither was mentioned, keep whatever
+  // was already set.
+  if (newAnalysis.cuisine !== null) {
+    merged.cuisine = newAnalysis.cuisine;
+    merged.dish = null;
+  } else if (newAnalysis.dish !== null) {
+    merged.dish = newAnalysis.dish;
+    merged.cuisine = null;
+  }
+
+  for (const field of MERGE_FIELDS) {
+    if (newAnalysis[field] !== null && newAnalysis[field] !== undefined) {
+      merged[field] = newAnalysis[field];
+    }
+  }
+
+  // Exclusions accumulate across turns instead of being replaced.
+  const prevMustNot = previousAnalysis.must_not || [];
+  const newMustNot = newAnalysis.must_not || [];
+  merged.must_not = [...new Set([...prevMustNot, ...newMustNot])];
+
+  // Always reflects the latest turn.
+  merged.priority = newAnalysis.priority;
+  merged.time_sensitive = newAnalysis.time_sensitive;
+  merged.interpretation = newAnalysis.interpretation;
+  merged.intent = newAnalysis.intent;
+
+  return merged;
+}
+
 async function searchRestaurants(userQuery, analysis, restaurantData, radiusKm) {
   const priceCeiling = parsePriceCeiling(analysis.price);
   let filteredData = restaurantData;
   if (priceCeiling !== null && priceCeiling < 4) {
     const beforeCount = filteredData.length;
-    filteredData = filteredData.filter(r =>
+    const strict = restaurantData.filter(r =>
       r.price_level === null || r.price_level <= priceCeiling
     );
+
+    // Google's price_level tiers don't account for regional cost of living —
+    // an entire city's worth of results can sit one tier above the ceiling
+    // (e.g. every option tagged "Moderate" when the user asked for "cheap"),
+    // which would otherwise wipe out every candidate before scoring even
+    // runs. Fall back to a one-tier-looser cutoff before giving up on price
+    // filtering altogether.
+    if (strict.length > 0) {
+      filteredData = strict;
+    } else {
+      const loose = restaurantData.filter(r =>
+        r.price_level === null || r.price_level <= priceCeiling + 1
+      );
+      filteredData = loose.length > 0 ? loose : restaurantData;
+    }
     console.log(`Price filter (≤ level ${priceCeiling}): ${beforeCount} → ${filteredData.length} restaurants`);
   }
 
@@ -401,21 +482,40 @@ Respond ONLY with a JSON array, no other text:
 }
 
 app.post("/search", async (req, res) => {
-  const userQuery = req.body.query;
+  const userQuery = req.body.query || null;
   const previousQuery = req.body.previousQuery || null;
+  const previousAnalysis = req.body.previousAnalysis || null;
+  // Set when the user removes a constraint tag client-side instead of typing
+  // a new query — skips re-classification and uses the edited analysis as-is.
+  const directAnalysis = req.body.directAnalysis || null;
   const userLat = req.body.latitude || null;
   const userLon = req.body.longitude || null;
 
-  console.log("Search received:", userQuery);
+  console.log("Search received:", userQuery || "(tag removed, no new query)");
 
   try {
-    console.log("Calling analyzeQuery...");
-    const analysis = await analyzeQuery(userQuery, previousQuery);
-    console.log("Analysis done:", JSON.stringify(analysis));
+    let analysis;
+    let isPivotOrNew;
 
-    const isPivotOrNew = analysis.intent === "pivot" || analysis.intent === "new";
-    const effectivePrevious = isPivotOrNew ? null : previousQuery;
-    const fullQuery = effectivePrevious ? `${effectivePrevious}. Also: ${userQuery}` : userQuery;
+    if (directAnalysis) {
+      analysis = { ...directAnalysis, intent: "refine" };
+      analysis.interpretation = await regenerateInterpretation(analysis);
+      isPivotOrNew = false;
+      console.log("Using edited analysis (tag removed):", JSON.stringify(analysis));
+    } else {
+      console.log("Calling analyzeQuery...");
+      const newAnalysis = await analyzeQuery(userQuery, previousQuery);
+      console.log("Analysis done:", JSON.stringify(newAnalysis));
+
+      analysis = mergeAnalysis(previousAnalysis, newAnalysis);
+      isPivotOrNew = newAnalysis.intent === "pivot" || newAnalysis.intent === "new";
+      console.log("Merged analysis:", JSON.stringify(analysis));
+    }
+
+    // Structured `analysis` now carries the full accumulated state, so each
+    // turn's search text only needs to be this turn's own message — no more
+    // concatenating the whole conversation into one run-on string.
+    const fullQuery = userQuery || analysis.interpretation || analysis.priority || "restaurants";
 
     const radiusKm = computeRadiusKm(analysis.proximity);
     console.log(`Proximity: ${JSON.stringify(analysis.proximity)} → radius ${radiusKm} km`);
