@@ -92,14 +92,18 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
   return Math.round(R * c * 10) / 10;
 }
 
-function getResultCap(results) {
+// The tiered caps below exist so a search with only weak matches doesn't pad
+// itself out with junk — that logic stays regardless of what the user asked
+// for. `userMax` (the "Max Results" setting) only raises the ceiling for
+// genuinely strong result sets; it never forces weak matches to be shown.
+function getResultCap(results, userMax = 10) {
   if (results.length === 0) return 0;
   const topScore = Math.max(...results.map(r => r.score));
-  if (topScore >= 90) return 10;
-  if (topScore >= 70) return 7;
-  if (topScore >= 50) return 5;
-  if (topScore >= 30) return 3;
-  return 1;
+  if (topScore >= 90) return userMax;
+  if (topScore >= 70) return Math.min(7, userMax);
+  if (topScore >= 50) return Math.min(5, userMax);
+  if (topScore >= 30) return Math.min(3, userMax);
+  return Math.min(1, userMax);
 }
 
 function priceLevel(level) {
@@ -219,6 +223,7 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
       allPlaces.set(place.name, {
         name: place.name,
         place_id: place.place_id,
+        photo_reference: place.photos?.[0]?.photo_reference || null,
         cuisine: term,
         location: place.vicinity || "",
         price: priceLevel(place.price_level) || (place.rating ? `Rated ${place.rating}★` : "See Google Maps"),
@@ -464,7 +469,7 @@ function applyPriceFilter(restaurantData, priceStr) {
   return restaurantData;
 }
 
-async function searchRestaurants(userQuery, analysis, restaurantData, radiusKm) {
+async function searchRestaurants(userQuery, analysis, restaurantData, radiusKm, maxResults) {
   let filteredData = applyPriceFilter(restaurantData, analysis.price);
 
   console.log(`Fetching real reviews for ${filteredData.length} shortlisted restaurants...`);
@@ -514,7 +519,7 @@ SCORING RULES:
 - Use Google rating and review count as quality signals but do not let high ratings override a wrong vibe.
 - Price has already been pre-filtered — do not penalise any restaurant in this list for price.
 - Only return restaurants that genuinely match. Return [] if nothing scores above 30.
-- Return at most 15 restaurants — the highest-scoring ones — even if more qualify.
+- Return at most ${maxResults} restaurants — the highest-scoring ones — even if more qualify.
 - Distance is already shown to the user as its own tag — do NOT mention distance, km, or "away" in "summary" or "evidence". Use that space to talk about the restaurant itself: cuisine, dish, atmosphere, rating, reviews, why it fits.
 
 Respond ONLY with a JSON array, no other text:
@@ -555,6 +560,9 @@ app.post("/search", async (req, res) => {
   const directAnalysis = req.body.directAnalysis || null;
   const userLat = req.body.latitude || null;
   const userLon = req.body.longitude || null;
+  // Clamp to a sane range regardless of what the client sends — this only
+  // raises the ceiling for genuinely strong result sets (see getResultCap).
+  const maxResults = Math.min(Math.max(parseInt(req.body.maxResults, 10) || 5, 1), 20);
 
   console.log("Search received:", userQuery || "(tag removed, no new query)");
 
@@ -590,7 +598,7 @@ app.post("/search", async (req, res) => {
     console.log(`Got ${restaurantData.length} restaurants from Google`);
 
     console.log("Calling searchRestaurants...");
-    const results = await searchRestaurants(fullQuery, analysis, restaurantData, radiusKm);
+    const results = await searchRestaurants(fullQuery, analysis, restaurantData, radiusKm, maxResults);
 
     results.forEach(r => {
       const match = restaurantData.find(d => d.name === r.name);
@@ -599,6 +607,7 @@ app.post("/search", async (req, res) => {
         r.longitude = match.longitude;
         r.distance_km = match.distance_km;
         r.open_now = match.open_now;
+        r.photo_reference = match.photo_reference;
       }
     });
 
@@ -634,7 +643,7 @@ app.post("/search", async (req, res) => {
       }
       return b.score - a.score;
     });
-    const cap = getResultCap(sortedResults);
+    const cap = getResultCap(sortedResults, maxResults);
     const cappedResults = sortedResults.slice(0, cap);
 
     res.json({ analysis, results: cappedResults, intent: analysis.intent, clearedContext: isPivotOrNew });
@@ -642,6 +651,31 @@ app.post("/search", async (req, res) => {
   } catch (error) {
     console.error("Error:", error.message);
     res.status(500).json({ error: error.message || "Something went wrong" });
+  }
+});
+
+// Proxies Google's Place Photo endpoint so the browser never sees our
+// Google API key — the key has to go in that URL's querystring, so calling
+// it directly from the client would leak it, breaking the pattern every
+// other Google/Anthropic call in this app already follows (server-side only).
+app.get("/photo", async (req, res) => {
+  const ref = req.query.ref;
+  if (!ref) return res.status(400).send("Missing ref");
+
+  try {
+    const response = await axios.get(
+      "https://maps.googleapis.com/maps/api/place/photo",
+      {
+        params: { maxwidth: 400, photo_reference: ref, key: GOOGLE_API_KEY },
+        responseType: "stream",
+      }
+    );
+    res.set("Content-Type", response.headers["content-type"]);
+    res.set("Cache-Control", "public, max-age=86400"); // a given photo_reference's image doesn't change
+    response.data.pipe(res);
+  } catch (error) {
+    console.error("Photo proxy failed:", error.message);
+    res.status(502).send("Photo unavailable");
   }
 });
 

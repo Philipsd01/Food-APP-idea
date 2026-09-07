@@ -84,15 +84,15 @@
           <span>Language</span>
           <span class="menu-value">English</span>
         </div>
-        <div class="menu-item" onclick="closeMenu()">
+        <div class="menu-item" onclick="toggleDistanceUnit()">
           <i class="ti ti-ruler-measure"></i>
           <span>Distance Unit</span>
-          <span class="menu-value">km</span>
+          <span class="menu-value" id="distanceUnitLabel">km</span>
         </div>
-        <div class="menu-item" onclick="closeMenu()">
+        <div class="menu-item" onclick="cycleMaxResults()">
           <i class="ti ti-list-numbers"></i>
           <span>Max Results</span>
-          <span class="menu-value">5</span>
+          <span class="menu-value" id="maxResultsLabel">5</span>
         </div>
       </div>
     </div>
@@ -159,6 +159,10 @@
     let isLoading = false;
     let lastQuery = "";
 
+    const MAX_RESULTS_OPTIONS = [5, 10, 15, 20];
+    let distanceUnit = localStorage.getItem("distanceUnit") || "km";
+    let maxResults = parseInt(localStorage.getItem("maxResults"), 10) || 5;
+
     // Try the browser's real GPS first; if it's denied, blocked, or times out
     // (common in DevTools device emulation or when OS location services are
     // off), fall back to a rough IP-based location so search still works.
@@ -215,7 +219,7 @@
 
     function makePopupHtml(r, index) {
       const scoreClass = r.score >= 80 ? 'high' : r.score >= 50 ? 'medium' : 'low';
-      const meta = [r.tags?.cuisine, r.distance_km ? r.distance_km + ' km' : null].filter(Boolean).join(' · ');
+      const meta = [r.tags?.cuisine, formatDistance(r.distance_km)].filter(Boolean).join(' · ');
       return `
         <div class="map-popup">
           <div class="map-popup-header">
@@ -282,6 +286,93 @@
       search(updated);
     }
 
+    function formatDistance(km) {
+      if (km === null || km === undefined) return null;
+      if (distanceUnit === "mi") {
+        const mi = km * 0.621371;
+        return `${mi < 10 ? mi.toFixed(1) : Math.round(mi)} mi`;
+      }
+      return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+    }
+
+    // Pulled out of search() so a Distance Unit toggle can re-render the
+    // already-fetched results in the new unit without a fresh network call.
+    function renderResults(results) {
+      if (results.length === 0) {
+        resultsBox.innerHTML = `
+          <div class="no-results">
+            <p>Nothing quite fits what you're looking for</p>
+            <p>Try broadening your search or describing what you want differently</p>
+          </div>`;
+        return;
+      }
+
+      if (document.getElementById('btnMap').classList.contains('active')) {
+        initMap(results);
+      }
+
+      resultsBox.innerHTML = "";
+      results.forEach((r, index) => {
+        const scoreClass = r.score >= 80 ? "high" : r.score >= 50 ? "medium" : "low";
+        const label = scoreLabel(r.score);
+
+        let cardTagsHtml = "";
+        if (r.tags) {
+          if (r.tags.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${r.tags.cuisine}</span>`;
+          if (r.tags.price) cardTagsHtml += `<span class="card-tag price">${r.tags.price}</span>`;
+          const distanceLabel = formatDistance(r.distance_km);
+          if (distanceLabel) cardTagsHtml += `<span class="card-tag highlight">${distanceLabel}</span>`;
+          if (r.open_now === true) cardTagsHtml += `<span class="card-tag open-now">Open now</span>`;
+          if (r.open_now === false) cardTagsHtml += `<span class="card-tag closed-now">Closed</span>`;
+        } else if (r.cuisine) {
+          cardTagsHtml += `<span class="card-tag cuisine">${r.cuisine}</span>`;
+        }
+
+        let evidenceHtml = "";
+        if (r.evidence && r.evidence.length > 0) {
+          evidenceHtml = `<div class="evidence">${r.evidence.map(e =>
+            `<p><span class="evidence-quote">" </span>${e}</p>`
+          ).join("")}</div>`;
+        }
+        const photoHtml = r.photo_reference
+          ? `<img class="card-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()">`
+          : "";
+
+        resultsBox.innerHTML += `
+          <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="this.classList.toggle('expanded')">
+            ${photoHtml}
+            <div class="card-header">
+              <span class="card-name">${r.name}</span>
+              <span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${scoreHint(r.score)}"` : ''}>${label}</span>
+            </div>
+            <div class="card-tags">${cardTagsHtml}</div>
+              ${r.score < 80 ? `<p class="card-score-hint">${scoreHint(r.score)}</p>` : ''}
+            <p class="card-summary">${r.summary}</p>
+            ${evidenceHtml}
+            <div class="card-footer">
+              <button class="card-map-btn" onclick="event.stopPropagation(); focusOnMap(${index})">
+                <i class="ti ti-map-pin"></i> Show on map
+              </button>
+              <div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>
+            </div>
+          </div>`;
+      });
+    }
+
+    function toggleDistanceUnit() {
+      distanceUnit = distanceUnit === "km" ? "mi" : "km";
+      localStorage.setItem("distanceUnit", distanceUnit);
+      document.getElementById("distanceUnitLabel").textContent = distanceUnit;
+      if (currentResults.length > 0) renderResults(currentResults);
+    }
+
+    function cycleMaxResults() {
+      const idx = MAX_RESULTS_OPTIONS.indexOf(maxResults);
+      maxResults = MAX_RESULTS_OPTIONS[(idx + 1) % MAX_RESULTS_OPTIONS.length];
+      localStorage.setItem("maxResults", maxResults);
+      document.getElementById("maxResultsLabel").textContent = maxResults;
+    }
+
     async function search(directAnalysis) {
       const query = directAnalysis ? "" : searchInput.value.trim();
       if (!directAnalysis && !query) return;
@@ -343,7 +434,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             query, previousQuery, previousAnalysis: currentAnalysis, directAnalysis,
-            latitude: userLatitude, longitude: userLongitude,
+            latitude: userLatitude, longitude: userLongitude, maxResults,
           }),
         });
 
@@ -369,58 +460,8 @@
         document.getElementById('viewToggle').style.display = 'flex';
         error.style.display = "none";
 
-        if (data.results.length === 0) {
-          resultsBox.innerHTML = `
-            <div class="no-results">
-              <p>Nothing quite fits what you're looking for</p>
-              <p>Try broadening your search or describing what you want differently</p>
-            </div>`;
-        } else {
-          currentResults = data.results;
-          if (document.getElementById('btnMap').classList.contains('active')) {
-            initMap(currentResults);
-          }
-
-          data.results.forEach((r, index) => {
-            const scoreClass = r.score >= 80 ? "high" : r.score >= 50 ? "medium" : "low";
-            const label = scoreLabel(r.score);
-
-            let cardTagsHtml = "";
-            if (r.tags) {
-              if (r.tags.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${r.tags.cuisine}</span>`;
-              if (r.tags.price) cardTagsHtml += `<span class="card-tag price">${r.tags.price}</span>`;
-              if (r.tags.distance) cardTagsHtml += `<span class="card-tag highlight">${r.tags.distance}</span>`;
-              if (r.open_now === true) cardTagsHtml += `<span class="card-tag open-now">Open now</span>`;
-              if (r.open_now === false) cardTagsHtml += `<span class="card-tag closed-now">Closed</span>`;
-            } else if (r.cuisine) {
-              cardTagsHtml += `<span class="card-tag cuisine">${r.cuisine}</span>`;
-            }
-
-            let evidenceHtml = "";
-            if (r.evidence && r.evidence.length > 0) {
-              evidenceHtml = `<div class="evidence">${r.evidence.map(e =>
-                `<p><span class="evidence-quote">" </span>${e}</p>`
-              ).join("")}</div>`;
-            }
-            resultsBox.innerHTML += `
-              <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="this.classList.toggle('expanded')">
-                <div class="card-header">
-                  <span class="card-name">${r.name}</span>
-                  <span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${scoreHint(r.score)}"` : ''}>${label}</span>
-                </div>
-                <div class="card-tags">${cardTagsHtml}</div>
-                  ${r.score < 80 ? `<p class="card-score-hint">${scoreHint(r.score)}</p>` : ''}
-                <p class="card-summary">${r.summary}</p>
-                ${evidenceHtml}
-                <div class="card-footer">
-                  <button class="card-map-btn" onclick="event.stopPropagation(); focusOnMap(${index})">
-                    <i class="ti ti-map-pin"></i> Show on map
-                  </button>
-                  <div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>
-                </div>
-              </div>`;
-          });
-        }
+        currentResults = data.results;
+        renderResults(currentResults);
 
         searchInput.placeholder = '↳ refine: "but cheaper" or "with outdoor seating"';
 
@@ -559,7 +600,11 @@
         })
           .addTo(map)
           .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' });
-        markers.push(marker);
+        // Indexed, not pushed — a restaurant with no coordinates gets skipped
+        // above without advancing this array, so push() would silently drift
+        // every later marker's position out of sync with currentResults[index]
+        // (focusOnMap uses that same index to open a popup).
+        markers[index] = marker;
       });
     }
 
@@ -622,7 +667,7 @@
           })
             .addTo(map)
             .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' });
-          markers.push(marker);
+          markers[index] = marker;
         });
       }
     }
@@ -632,6 +677,9 @@
       document.body.classList.add("dark");
       document.getElementById("themeLabel").textContent = "Dark";
     }
+
+    document.getElementById("distanceUnitLabel").textContent = distanceUnit;
+    document.getElementById("maxResultsLabel").textContent = maxResults;
   </script>
 </body>
 
