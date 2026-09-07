@@ -506,6 +506,15 @@ body.dark .view-toggle {
     padding: 4px 0;
 }
 
+.loading-status {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+    text-align: center;
+    margin-bottom: 12px;
+}
+
 .error {
     text-align: center;
     color: var(--ember);
@@ -1025,6 +1034,13 @@ body.dark .leaflet-popup-content strong {
     margin-top: 6px;
 }
 
+.card-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
 .card-map-btn {
     background: none;
     border: 0.5px solid var(--border);
@@ -1035,6 +1051,7 @@ body.dark .leaflet-popup-content strong {
     letter-spacing: 0.06em;
     color: var(--ink-3);
     cursor: pointer;
+    text-decoration: none;
     display: flex;
     align-items: center;
     gap: 4px;

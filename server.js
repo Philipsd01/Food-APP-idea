@@ -166,8 +166,13 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
 
   const locationHint = analysis.location ? ` near ${analysis.location}` : "";
 
-  // Don't append "restaurant" for brand/chain searches — it confuses Google Places
-  const isBrandSearch = !analysis.cuisine && analysis.dish;
+  // Don't append "restaurant" for brand/chain searches — it confuses Google Places.
+  // Was previously inferred as "!cuisine && dish", which is also true for any
+  // plain dish search (e.g. "pizza") — that stripped "restaurant" and the
+  // type=restaurant filter from every dish-only query, degrading results
+  // (occasionally down to zero in less dense areas). Trust the actual
+  // classification instead of guessing from field nullness.
+  const isBrandSearch = analysis.is_brand === true;
 
   // Each search term is an independent Google Places request — fire them in
   // parallel instead of awaiting one at a time (this only matters for
@@ -205,48 +210,63 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
     return { term, results: response.data.results || [] };
   }));
 
-  const allPlaces = new Map();
-
+  // Dedupe by name first, keeping every candidate's computed distance —
+  // the radius decision happens after, once we know how many candidates
+  // actually fall within it.
+  const candidatesByName = new Map();
   for (const { term, results } of termResults) {
     for (const place of results.slice(0, 20)) {
-      if (allPlaces.has(place.name)) continue;
-
+      if (candidatesByName.has(place.name)) continue;
       const placeLat = place.geometry?.location?.lat;
       const placeLng = place.geometry?.location?.lng;
       const distance = placeLat && placeLng ? getDistanceKm(lat, lng, placeLat, placeLng) : null;
-
-      // Google's Text Search API treats radius/location as a ranking bias, not a
-      // hard filter — it can still return places well outside it if they match
-      // the query text strongly. Enforce the requested radius ourselves.
-      if (distance !== null && distance > radiusKm) continue;
-
-      allPlaces.set(place.name, {
-        name: place.name,
-        place_id: place.place_id,
-        photo_reference: place.photos?.[0]?.photo_reference || null,
-        cuisine: term,
-        location: place.vicinity || "",
-        price: priceLevel(place.price_level) || (place.rating ? `Rated ${place.rating}★` : "See Google Maps"),
-        price_level: place.price_level ?? null,
-        latitude: placeLat,
-        longitude: placeLng,
-        distance_km: distance,
-        open_now: place.opening_hours?.open_now ?? null,
-        rating: place.rating || null,
-        review_count: place.user_ratings_total || 0,
-        description: `${place.name} is located in ${place.vicinity || "the area"}. ${place.rating ? `Rated ${place.rating}/5 based on ${place.user_ratings_total} reviews.` : ""} ${place.opening_hours?.open_now !== undefined ? (place.opening_hours.open_now ? "Currently open." : "Currently closed.") : ""}`,
-        reviews: [
-          place.rating ? `Rated ${place.rating}/5 stars by ${place.user_ratings_total || 0} Google reviewers.` : "No rating available.",
-          place.opening_hours?.open_now !== undefined ? (place.opening_hours.open_now ? "Currently open." : "Currently closed.") : "Opening hours unknown.",
-          place.vicinity ? `Located at ${place.vicinity}.` : "",
-          place.price_level !== undefined ? `Price level: ${priceLevel(place.price_level)}.` : "Price unknown.",
-        ].filter(Boolean),
-        // Filled in later, only for the shortlisted candidates that reach
-        // scoring — real excerpts from Google reviewers, used as ground
-        // truth for atmosphere/noise/dish claims instead of guesswork.
-        customer_reviews: [],
-      });
+      candidatesByName.set(place.name, { place, term, distance });
     }
+  }
+  const allCandidates = [...candidatesByName.values()];
+
+  // Google's Text Search API treats radius/location as a ranking bias, not a
+  // hard filter — it can return places well outside the requested radius if
+  // they match the query text strongly (occasionally from a different city
+  // entirely). Enforce the requested radius ourselves — but if the area is
+  // genuinely sparse and nothing sits within it (e.g. the nearest pizza place
+  // is 7 km out when the radius was 5), fall back to a looser cutoff instead
+  // of returning zero results for what's actually just a real sparse area.
+  let selected = allCandidates.filter(c => c.distance === null || c.distance <= radiusKm);
+  if (selected.length === 0 && allCandidates.length > 0) {
+    const looseRadiusKm = radiusKm * 3;
+    selected = allCandidates.filter(c => c.distance === null || c.distance <= looseRadiusKm);
+    console.log(`No places within ${radiusKm} km — falling back to ${looseRadiusKm} km (${selected.length} found)`);
+  }
+
+  const allPlaces = new Map();
+  for (const { place, term, distance } of selected) {
+    allPlaces.set(place.name, {
+      name: place.name,
+      place_id: place.place_id,
+      photo_reference: place.photos?.[0]?.photo_reference || null,
+      cuisine: term,
+      location: place.vicinity || "",
+      price: priceLevel(place.price_level) || (place.rating ? `Rated ${place.rating}★` : "See Google Maps"),
+      price_level: place.price_level ?? null,
+      latitude: place.geometry?.location?.lat,
+      longitude: place.geometry?.location?.lng,
+      distance_km: distance,
+      open_now: place.opening_hours?.open_now ?? null,
+      rating: place.rating || null,
+      review_count: place.user_ratings_total || 0,
+      description: `${place.name} is located in ${place.vicinity || "the area"}. ${place.rating ? `Rated ${place.rating}/5 based on ${place.user_ratings_total} reviews.` : ""} ${place.opening_hours?.open_now !== undefined ? (place.opening_hours.open_now ? "Currently open." : "Currently closed.") : ""}`,
+      reviews: [
+        place.rating ? `Rated ${place.rating}/5 stars by ${place.user_ratings_total || 0} Google reviewers.` : "No rating available.",
+        place.opening_hours?.open_now !== undefined ? (place.opening_hours.open_now ? "Currently open." : "Currently closed.") : "Opening hours unknown.",
+        place.vicinity ? `Located at ${place.vicinity}.` : "",
+        place.price_level !== undefined ? `Price level: ${priceLevel(place.price_level)}.` : "Price unknown.",
+      ].filter(Boolean),
+      // Filled in later, only for the shortlisted candidates that reach
+      // scoring — real excerpts from Google reviewers, used as ground
+      // truth for atmosphere/noise/dish claims instead of guesswork.
+      customer_reviews: [],
+    });
   }
 
   return [...allPlaces.values()];
@@ -257,18 +277,28 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
 // behind them. Place Details (billed separately, "Atmosphere" data) returns
 // up to 5 real review excerpts per place, fetched only for the shortlisted
 // candidates that make it to scoring.
-async function fetchPlaceReviews(placeId) {
-  if (!placeId) return [];
+// One Place Details call per shortlisted restaurant already happens for
+// review text — pull phone/website in the same request (Contact-category
+// fields) instead of a second billed call, so "Call"/"Website" buttons don't
+// double the Place Details cost per search.
+async function fetchPlaceDetails(placeId) {
+  const empty = { reviews: [], phone: null, website: null };
+  if (!placeId) return empty;
   try {
     const response = await axios.get(
       "https://maps.googleapis.com/maps/api/place/details/json",
-      { params: { place_id: placeId, fields: "review", key: GOOGLE_API_KEY } }
+      { params: { place_id: placeId, fields: "review,formatted_phone_number,website", key: GOOGLE_API_KEY } }
     );
-    if (response.data.status !== "OK") return [];
-    return (response.data.result?.reviews || []).map(r => r.text).filter(Boolean);
+    if (response.data.status !== "OK") return empty;
+    const result = response.data.result || {};
+    return {
+      reviews: (result.reviews || []).map(r => r.text).filter(Boolean),
+      phone: result.formatted_phone_number || null,
+      website: result.website || null,
+    };
   } catch (error) {
     console.error(`Place Details failed for ${placeId}:`, error.message);
-    return [];
+    return empty;
   }
 }
 
@@ -297,11 +327,10 @@ ${previousQuery ? `Also detect the user's INTENT based on their new message:
 If the message is ambiguous, default to "refine".` : ""}
 
 CUISINE RULES:
-- If the user specifies a specific dish (e.g. "wagyu", "ramen", "carbonara"), set "dish" and set "cuisine" to null. Do NOT keep a generic cuisine tag when a specific dish has been named.
+- If the user specifies a specific dish (e.g. "wagyu", "ramen", "carbonara"), set "dish" and set "cuisine" to null. Do NOT keep a generic cuisine tag when a specific dish has been named. Set "is_brand" to false — a dish name is not a brand.
 - If the user says "Japanese or Italian", set cuisine to "Japanese or Italian" exactly.
 - Never infer a sub-cuisine (e.g. "sushi") from a broad term like "Japanese" — keep it broad.
-- If the user names a specific restaurant chain or brand (e.g. "Starbucks", "McDonald's", "Ippudo"), set "dish" to that brand name so it gets searched directly on Google Places.
-- If the user names a specific restaurant brand or chain (e.g. "Starbucks", "McDonald's", "Ippudo", "Ichiran"), set "dish" to that brand name and set "cuisine" to null. This ensures the brand name gets searched directly on Google Places without modification.
+- If the user names a specific restaurant chain or brand (e.g. "Starbucks", "McDonald's", "Ippudo", "Ichiran"), set "dish" to that brand name, set "cuisine" to null, and set "is_brand" to true. This is the ONLY case where "is_brand" should be true — it controls whether "restaurant" gets appended to the Google Places query, and appending it to an actual brand name (e.g. "Starbucks restaurant") confuses the search.
 
 ATMOSPHERE RULES:
 - "quiet", "relaxed", "peaceful", "chill", "unwind", "low-key" mean LOW NOISE and CASUAL PACE — NOT upscale, NOT omakase, NOT formal. Only use "upscale" or "fine dining" atmosphere if the user explicitly says those words.
@@ -319,6 +348,7 @@ Respond ONLY with a valid JSON object. No comments, no extra text, no markdown:
 {
   "cuisine": "specific cuisine, 'Japanese or Italian', or null",
   "dish": "specific dish or null",
+  "is_brand": true or false — true ONLY if "dish" is a restaurant chain/brand name (e.g. Starbucks, Ippudo), false for a generic dish (e.g. pizza, ramen) or when dish is null,
   "atmosphere": "vibe or null",
   "occasion": "occasion or null",
   "audience": "who they are dining with or null",
@@ -380,9 +410,11 @@ function mergeAnalysis(previousAnalysis, newAnalysis) {
   if (newAnalysis.cuisine !== null) {
     merged.cuisine = newAnalysis.cuisine;
     merged.dish = null;
+    merged.is_brand = false; // a cuisine is never a brand
   } else if (newAnalysis.dish !== null) {
     merged.dish = newAnalysis.dish;
     merged.cuisine = null;
+    merged.is_brand = newAnalysis.is_brand === true;
   }
 
   for (const field of MERGE_FIELDS) {
@@ -474,8 +506,8 @@ async function searchRestaurants(userQuery, analysis, restaurantData, radiusKm, 
 
   console.log(`Fetching real reviews for ${filteredData.length} shortlisted restaurants...`);
   filteredData = await Promise.all(filteredData.map(async (r) => {
-    const customerReviews = await fetchPlaceReviews(r.place_id);
-    return { ...r, customer_reviews: customerReviews };
+    const details = await fetchPlaceDetails(r.place_id);
+    return { ...r, customer_reviews: details.reviews, phone: details.phone, website: details.website };
   }));
 
   const response = await client.messages.create({
@@ -510,7 +542,7 @@ SCORING RULES:
 - CUISINE IS THE HIGHEST PRIORITY. Wrong cuisine = max score 35. Right cuisine = base score 60.
 - If the user said "Japanese or Italian", both cuisines are equally valid — return a balanced mix, do NOT favour one over the other.
 - If a specific dish was requested (e.g. wagyu, ramen), heavily weight restaurants likely to serve that dish.
-- If a specific brand or chain was requested (e.g. Starbucks, McDonald's), the ONLY criteria is whether the restaurant name matches that brand. Score any matching location 90+. Ignore cuisine scoring entirely for brand searches.
+- If "is_brand" is true (a specific brand/chain like Starbucks or McDonald's was requested), the ONLY criteria is whether the restaurant name matches that brand. Score any matching location 90+. Ignore cuisine scoring entirely for brand searches.
 - Factor in distance_km: under ${radiusKm} km = great, under ${Math.round(radiusKm * 2 * 10) / 10} km = good, under ${Math.round(radiusKm * 3 * 10) / 10} km = acceptable.
 - If a specific location or landmark was requested, prioritise restaurants closest to it.
 - "must_not" items are HARD DISQUALIFIERS — score below 20 if matched.
@@ -548,7 +580,15 @@ Respond ONLY with a JSON array, no other text:
     console.error("searchRestaurants: could not find a JSON array in the response. Raw text was:\n", raw);
     throw new Error('No JSON array found in searchRestaurants response');
   }
-  return JSON.parse(raw.slice(start, end + 1));
+  const scored = JSON.parse(raw.slice(start, end + 1));
+
+  // Claude's scoring response only carries name/score/summary/etc — phone and
+  // website live on filteredData (from the Place Details enrichment above)
+  // and need to be reattached so the client can render Call/Website buttons.
+  return scored.map(r => {
+    const match = filteredData.find(d => d.name === r.name);
+    return match ? { ...r, phone: match.phone, website: match.website } : r;
+  });
 }
 
 app.post("/search", async (req, res) => {
@@ -630,7 +670,7 @@ app.post("/search", async (req, res) => {
     console.log("Results done:", results.length, "results");
 
     // For brand searches, accept any result if Google returned it
-    const isBrandQuery = (!analysis.cuisine || analysis.cuisine === '') && analysis.dish;
+    const isBrandQuery = analysis.is_brand === true;
     const finalResults = isBrandQuery
       ? results.filter(r => r.score > 0)
       : results;
