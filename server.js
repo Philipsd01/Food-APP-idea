@@ -19,12 +19,15 @@ const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const DEFAULT_LAT = null;
 const DEFAULT_LNG = null;
 
+// Explicit dollar amounts — these are a genuine fixed request ("under $15"
+// means under $15 anywhere), so they stay mapped to Google's absolute
+// price_level scale rather than treated as relative.
 const PRICE_BUDGET_MAP = {
-  "under 10": 1, "under $10": 1, "budget": 1, "cheap": 1,
+  "under 10": 1, "under $10": 1,
   "10-15": 1, "$10-15": 1, "10-20": 1, "$10-20": 1, "around $10": 1, "around $15": 1,
-  "10-30": 2, "$10-30": 2, "moderate": 2, "mid": 2, "around $20": 2, "around $25": 2, "around $30": 2,
+  "10-30": 2, "$10-30": 2, "around $20": 2, "around $25": 2, "around $30": 2,
   "30-60": 3, "$30-60": 3, "around $40": 3, "around $50": 3,
-  "60+": 4, "$60+": 4, "fine dining": 4, "no limit": 4, "unlimited": 4, "no budget": 4,
+  "60+": 4, "$60+": 4,
 };
 
 function parsePriceCeiling(priceStr) {
@@ -32,6 +35,26 @@ function parsePriceCeiling(priceStr) {
   const lower = priceStr.toLowerCase();
   for (const [key, level] of Object.entries(PRICE_BUDGET_MAP)) {
     if (lower.includes(key)) return level;
+  }
+  return null;
+}
+
+// Vague/relative price words ("cheap", "upscale") don't name a dollar figure —
+// what counts as "cheap" depends entirely on what's actually available near
+// the user (see filterByRelativePrice), unlike the fixed dollar phrases above.
+const RELATIVE_PRICE_WORDS = {
+  low: ["cheap", "budget", "affordable", "inexpensive", "cheapest", "cheaply"],
+  high: ["expensive", "upscale", "pricey", "fine dining", "fancy", "high-end", "splurge"],
+  mid: ["moderate", "mid-range", "mid range", "average priced", "reasonably priced"],
+};
+const NO_PRICE_FILTER_WORDS = ["no limit", "unlimited", "no budget"];
+
+function parseRelativePriceRank(priceStr) {
+  if (!priceStr) return null;
+  const lower = priceStr.toLowerCase();
+  if (NO_PRICE_FILTER_WORDS.some(w => lower.includes(w))) return "none";
+  for (const [rank, words] of Object.entries(RELATIVE_PRICE_WORDS)) {
+    if (words.some(w => lower.includes(w))) return rank;
   }
   return null;
 }
@@ -377,31 +400,72 @@ function mergeAnalysis(previousAnalysis, newAnalysis) {
   return merged;
 }
 
-async function searchRestaurants(userQuery, analysis, restaurantData, radiusKm) {
-  const priceCeiling = parsePriceCeiling(analysis.price);
-  let filteredData = restaurantData;
+// "Cheap"/"expensive"/"moderate" are judged relative to what's actually
+// nearby, not a fixed global dollar tier — Copenhagen's cheapest ramen and
+// Hanoi's cheapest ramen carry wildly different Google price_level values,
+// but "cheap" should mean the same thing (the bottom of what's locally
+// available) in both places.
+function filterByRelativePrice(restaurantData, rank) {
+  if (rank === "none") return restaurantData;
+
+  const levels = [...new Set(
+    restaurantData.map(r => r.price_level).filter(l => l !== null && l !== undefined)
+  )].sort((a, b) => a - b);
+
+  if (levels.length === 0) return restaurantData; // no price data at all to be relative about
+
+  const min = levels[0];
+  const max = levels[levels.length - 1];
+
+  if (rank === "low") {
+    return restaurantData.filter(r => r.price_level === null || r.price_level === min);
+  }
+  if (rank === "high") {
+    return restaurantData.filter(r => r.price_level === null || r.price_level === max);
+  }
+  // "mid": exclude both extremes — but only when there's an actual spread to
+  // exclude from; with just 1-2 distinct levels present there's no meaningful
+  // "middle" to isolate.
+  if (levels.length < 3) return restaurantData;
+  return restaurantData.filter(r => r.price_level === null || (r.price_level !== min && r.price_level !== max));
+}
+
+function applyPriceFilter(restaurantData, priceStr) {
+  const relativeRank = parseRelativePriceRank(priceStr);
+  if (relativeRank) {
+    const beforeCount = restaurantData.length;
+    const filtered = filterByRelativePrice(restaurantData, relativeRank);
+    console.log(`Relative price filter ("${relativeRank}" of what's nearby): ${beforeCount} → ${filtered.length} restaurants`);
+    return filtered;
+  }
+
+  const priceCeiling = parsePriceCeiling(priceStr);
   if (priceCeiling !== null && priceCeiling < 4) {
-    const beforeCount = filteredData.length;
+    const beforeCount = restaurantData.length;
     const strict = restaurantData.filter(r =>
       r.price_level === null || r.price_level <= priceCeiling
     );
 
     // Google's price_level tiers don't account for regional cost of living —
     // an entire city's worth of results can sit one tier above the ceiling
-    // (e.g. every option tagged "Moderate" when the user asked for "cheap"),
-    // which would otherwise wipe out every candidate before scoring even
-    // runs. Fall back to a one-tier-looser cutoff before giving up on price
-    // filtering altogether.
-    if (strict.length > 0) {
-      filteredData = strict;
-    } else {
-      const loose = restaurantData.filter(r =>
-        r.price_level === null || r.price_level <= priceCeiling + 1
-      );
-      filteredData = loose.length > 0 ? loose : restaurantData;
+    // (e.g. every option tagged "Moderate" when the user asked for "under
+    // $15"), which would otherwise wipe out every candidate before scoring
+    // even runs. Fall back to a one-tier-looser cutoff before giving up on
+    // price filtering altogether.
+    let filtered = strict;
+    if (filtered.length === 0) {
+      const loose = restaurantData.filter(r => r.price_level === null || r.price_level <= priceCeiling + 1);
+      filtered = loose.length > 0 ? loose : restaurantData;
     }
-    console.log(`Price filter (≤ level ${priceCeiling}): ${beforeCount} → ${filteredData.length} restaurants`);
+    console.log(`Price filter (≤ level ${priceCeiling}): ${beforeCount} → ${filtered.length} restaurants`);
+    return filtered;
   }
+
+  return restaurantData;
+}
+
+async function searchRestaurants(userQuery, analysis, restaurantData, radiusKm) {
+  let filteredData = applyPriceFilter(restaurantData, analysis.price);
 
   console.log(`Fetching real reviews for ${filteredData.length} shortlisted restaurants...`);
   filteredData = await Promise.all(filteredData.map(async (r) => {
@@ -446,6 +510,7 @@ SCORING RULES:
 - If a specific location or landmark was requested, prioritise restaurants closest to it.
 - "must_not" items are HARD DISQUALIFIERS — score below 20 if matched.
 - ATMOSPHERE: "quiet", "relaxed", "peaceful", "chill", "unwind", "low-key" mean LOW NOISE and CASUAL PACE. If atmosphere contains any of these words, HARD PENALISE omakase, counter dining, fine dining, and formal restaurants — score them below 40 regardless of rating. A neighbourhood izakaya or casual ramen shop should outscore a Michelin-starred counter.
+- OCCASION & AUDIENCE: "occasion" (e.g. "date night", "birthday", "business lunch") and "audience" (e.g. "with kids", "with grandma", "with colleagues", "solo") describe who's going and why. Check "customer_reviews" for direct evidence — reviewers mentioning kid-friendly, romantic, good for groups, wheelchair accessible, quiet booths, etc. If reviews confirm a good fit, factor it in as a positive. If reviews actively contradict it (e.g. audience is "with kids" but reviews describe a loud bar-only, 21+ scene; or occasion is "date night" but reviews describe a rowdy sports-bar vibe), apply a moderate penalty — not a hard disqualifier like "must_not". If there's no review evidence either way, treat it as neutral and don't guess.
 - Use Google rating and review count as quality signals but do not let high ratings override a wrong vibe.
 - Price has already been pre-filtered — do not penalise any restaurant in this list for price.
 - Only return restaurants that genuinely match. Return [] if nothing scores above 30.
