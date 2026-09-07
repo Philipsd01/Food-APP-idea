@@ -139,11 +139,14 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
 
   const locationHint = analysis.location ? ` near ${analysis.location}` : "";
 
-  const allPlaces = new Map();
+  // Don't append "restaurant" for brand/chain searches — it confuses Google Places
+  const isBrandSearch = !analysis.cuisine && analysis.dish;
 
-  for (const term of searchTerms) {
-    // Don't append "restaurant" for brand/chain searches — it confuses Google Places
-    const isBrandSearch = !analysis.cuisine && analysis.dish;
+  // Each search term is an independent Google Places request — fire them in
+  // parallel instead of awaiting one at a time (this only matters for
+  // multi-cuisine queries like "Japanese or Italian", where searchTerms has
+  // more than one entry).
+  const termResults = await Promise.all(searchTerms.map(async (term) => {
     // No longer hardcodes "Osaka Japan" — relies on the `location` bias param
     // (lat/lng) below, which now reflects the user's real position.
     const googleQuery = isBrandSearch
@@ -172,7 +175,13 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
       throw new Error(`Google Places error: ${response.data.status}`);
     }
 
-    for (const place of (response.data.results || []).slice(0, 20)) {
+    return { term, results: response.data.results || [] };
+  }));
+
+  const allPlaces = new Map();
+
+  for (const { term, results } of termResults) {
+    for (const place of results.slice(0, 20)) {
       if (allPlaces.has(place.name)) continue;
 
       const placeLat = place.geometry?.location?.lat;
@@ -186,6 +195,7 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
 
       allPlaces.set(place.name, {
         name: place.name,
+        place_id: place.place_id,
         cuisine: term,
         location: place.vicinity || "",
         price: priceLevel(place.price_level) || (place.rating ? `Rated ${place.rating}★` : "See Google Maps"),
@@ -203,11 +213,35 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
           place.vicinity ? `Located at ${place.vicinity}.` : "",
           place.price_level !== undefined ? `Price level: ${priceLevel(place.price_level)}.` : "Price unknown.",
         ].filter(Boolean),
+        // Filled in later, only for the shortlisted candidates that reach
+        // scoring — real excerpts from Google reviewers, used as ground
+        // truth for atmosphere/noise/dish claims instead of guesswork.
+        customer_reviews: [],
       });
     }
   }
 
   return [...allPlaces.values()];
+}
+
+// Text Search never returns review text, only aggregate rating/count — so
+// claims about atmosphere, noise, or specific dishes had no real evidence
+// behind them. Place Details (billed separately, "Atmosphere" data) returns
+// up to 5 real review excerpts per place, fetched only for the shortlisted
+// candidates that make it to scoring.
+async function fetchPlaceReviews(placeId) {
+  if (!placeId) return [];
+  try {
+    const response = await axios.get(
+      "https://maps.googleapis.com/maps/api/place/details/json",
+      { params: { place_id: placeId, fields: "review", key: GOOGLE_API_KEY } }
+    );
+    if (response.data.status !== "OK") return [];
+    return (response.data.result?.reviews || []).map(r => r.text).filter(Boolean);
+  } catch (error) {
+    console.error(`Place Details failed for ${placeId}:`, error.message);
+    return [];
+  }
 }
 
 async function analyzeQuery(userQuery, previousQuery) {
@@ -216,7 +250,9 @@ async function analyzeQuery(userQuery, previousQuery) {
     : `Query: "${userQuery}"`;
 
   const response = await client.messages.create({
-    model: "claude-sonnet-5",
+    model: "claude-haiku-4-5", // structured field extraction, not nuanced judgment — Haiku is
+                                // plenty, and (unlike Sonnet 5) runs with no thinking by default,
+                                // so there's no adaptive-reasoning overhead to disable here.
     max_tokens: 600,
     messages: [{
       role: "user",
@@ -286,11 +322,21 @@ async function searchRestaurants(userQuery, analysis, restaurantData, radiusKm) 
     console.log(`Price filter (≤ level ${priceCeiling}): ${beforeCount} → ${filteredData.length} restaurants`);
   }
 
+  console.log(`Fetching real reviews for ${filteredData.length} shortlisted restaurants...`);
+  filteredData = await Promise.all(filteredData.map(async (r) => {
+    const customerReviews = await fetchPlaceReviews(r.place_id);
+    return { ...r, customer_reviews: customerReviews };
+  }));
+
   const response = await client.messages.create({
     model: "claude-sonnet-5",
     max_tokens: 8192, // raised from 4096 — 4096 still truncated mid-response for
                        // broad queries where most/all 20 restaurants score above 30
                        // and each gets a full summary/evidence/tags object.
+    thinking: { type: "disabled" }, // scoring follows an explicit rubric, not open-ended
+                                     // reasoning — adaptive thinking here was pure latency.
+                                     // Revisit (drop this, or use output_config.effort:"low"
+                                     // instead) if scoring quality regresses.
     messages: [{
       role: "user",
       content: `You are a restaurant discovery AI.
@@ -303,8 +349,14 @@ ${JSON.stringify(analysis, null, 2)}
 Here is the restaurant database:
 ${JSON.stringify(filteredData, null, 2)}
 
+Each restaurant's "customer_reviews" field (when non-empty) contains real excerpts
+written by Google reviewers — this is your only real evidence for atmosphere, noise
+level, and specific dishes. "reviews" and "description" are generated from
+rating/hours/price metadata, not real customer text.
+
 SCORING RULES:
 - Score each restaurant from 0 to 100 based on how well it matches.
+- For "must_not" and atmosphere judgments (e.g. "quiet", "not loud", "no seafood"): base the verdict on "customer_reviews" text when available. If a restaurant has no customer_reviews to confirm or deny a must_not claim, don't guess — treat it as unconfirmed rather than disqualifying it, and lower "confidence" to reflect that.
 - CUISINE IS THE HIGHEST PRIORITY. Wrong cuisine = max score 35. Right cuisine = base score 60.
 - If the user said "Japanese or Italian", both cuisines are equally valid — return a balanced mix, do NOT favour one over the other.
 - If a specific dish was requested (e.g. wagyu, ramen), heavily weight restaurants likely to serve that dish.
