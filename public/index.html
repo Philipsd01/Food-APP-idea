@@ -43,6 +43,24 @@
 
     <div class="menu-section">
       <div class="menu-section-label" onclick="toggleSection(this)">
+        <i class="ti ti-map-pin"></i>
+        <span>Location</span>
+        <i class="ti ti-chevron-down section-arrow"></i>
+      </div>
+      <div class="menu-section-items">
+        <div class="location-editor" onclick="event.stopPropagation()">
+          <p class="location-status" id="locationStatus">Auto-detecting...</p>
+          <div class="location-input-row">
+            <input type="text" id="locationInput" placeholder="e.g. Østerbro, Copenhagen">
+            <button onclick="setManualLocation()">Set</button>
+          </div>
+          <button class="location-reset-btn" id="locationResetBtn" onclick="clearManualLocation()" hidden>Use auto-detected location instead</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="menu-section">
+      <div class="menu-section-label" onclick="toggleSection(this)">
         <i class="ti ti-history"></i>
         <span>Search History</span>
         <i class="ti ti-chevron-down section-arrow"></i>
@@ -139,7 +157,7 @@
 
     <div class="results" id="results"></div>
     <div id="mapView"
-      style="display: none; height: calc(100vh - 280px); min-height: 340px; border-radius: 12px; overflow: hidden; margin-top: 10px;">
+      style="display: none; height: calc(100vh - 380px); min-height: 320px; max-height: 480px; border-radius: 12px; overflow: hidden; margin-top: 10px;">
     </div>
   </div>
   </div>
@@ -265,25 +283,60 @@
     let distanceUnit = localStorage.getItem("distanceUnit") || "km";
     let maxResults = parseInt(localStorage.getItem("maxResults"), 10) || 5;
 
-    // Try the browser's real GPS first; if it's denied, blocked, or times out
-    // (common in DevTools device emulation or when OS location services are
-    // off), fall back to a rough IP-based location so search still works.
-    const locationReady = new Promise((resolve) => {
-      if (!navigator.geolocation) { resolve(false); return; }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          userLatitude = pos.coords.latitude;
-          userLongitude = pos.coords.longitude;
-          resolve(true);
-        },
-        () => resolve(false),
-        { timeout: 5000 }
-      );
-    });
-
     let usedApproximateLocation = false;
 
+    // A GPS reading over this many meters of reported accuracy is treated as
+    // unreliable — the browser call "succeeds" either way, but a 10+ km
+    // accuracy radius (common with WiFi-based positioning on a laptop with
+    // no real GPS chip, especially if the router's entry in the positioning
+    // database is stale — or if there's no WiFi signal to use at all, which
+    // can silently fall all the way back to ~200km-accurate IP estimation)
+    // means the coordinates can legitimately be tens of km from reality
+    // despite no error being raised.
+    const LOW_CONFIDENCE_ACCURACY_METERS = 10000;
+
+    // A manually-set location always wins over anything automatic — the user
+    // confirmed it themselves, which beats any guess. Persisted so it
+    // survives a reload instead of needing to be re-entered every visit.
+    let manualLocation = null;
+    try {
+      manualLocation = JSON.parse(localStorage.getItem("manualLocation") || "null");
+    } catch (e) {
+      manualLocation = null;
+    }
+
+    function requestBrowserLocation() {
+      return new Promise((resolve) => {
+        if (!navigator.geolocation) { resolve(false); return; }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            userLatitude = pos.coords.latitude;
+            userLongitude = pos.coords.longitude;
+            console.log(`Browser geolocation accuracy: ~${Math.round(pos.coords.accuracy)}m`);
+            usedApproximateLocation = pos.coords.accuracy > LOW_CONFIDENCE_ACCURACY_METERS;
+            resolve(true);
+          },
+          () => resolve(false),
+          { timeout: 5000 }
+        );
+      });
+    }
+
+    // Skip the GPS permission prompt entirely when the user already told us
+    // where they are — no reason to ask the device when we already know.
+    let locationReady = manualLocation ? Promise.resolve(true) : requestBrowserLocation();
+    if (manualLocation) {
+      userLatitude = manualLocation.lat;
+      userLongitude = manualLocation.lng;
+    }
+
     async function ensureLocation() {
+      if (manualLocation) {
+        userLatitude = manualLocation.lat;
+        userLongitude = manualLocation.lng;
+        usedApproximateLocation = false; // user-confirmed, not a guess
+        return true;
+      }
       if (userLatitude != null && userLongitude != null) return true;
       if (await locationReady) return true;
       try {
@@ -299,6 +352,62 @@
       return false;
     }
 
+    function updateLocationStatusDisplay() {
+      const statusEl = document.getElementById("locationStatus");
+      const resetBtn = document.getElementById("locationResetBtn");
+      if (!statusEl || !resetBtn) return;
+      if (manualLocation) {
+        statusEl.textContent = `Using: ${manualLocation.label}`;
+        resetBtn.hidden = false;
+      } else if (userLatitude != null && userLongitude != null) {
+        statusEl.textContent = usedApproximateLocation
+          ? "Auto-detected, but imprecise — consider setting it manually"
+          : "Auto-detected from your device";
+        resetBtn.hidden = true;
+      } else {
+        statusEl.textContent = "Couldn't detect your location automatically";
+        resetBtn.hidden = true;
+      }
+    }
+
+    async function setManualLocation() {
+      const input = document.getElementById("locationInput");
+      const address = input.value.trim();
+      if (!address) return;
+
+      const statusEl = document.getElementById("locationStatus");
+      statusEl.textContent = `Looking up "${address}"...`;
+
+      try {
+        const res = await fetch(`/geocode?address=${encodeURIComponent(address)}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        manualLocation = { lat: data.lat, lng: data.lng, label: data.formatted_address };
+        localStorage.setItem("manualLocation", JSON.stringify(manualLocation));
+        userLatitude = data.lat;
+        userLongitude = data.lng;
+        usedApproximateLocation = false;
+        input.value = "";
+        updateLocationStatusDisplay();
+      } catch (err) {
+        statusEl.textContent = err.message || "Couldn't find that location.";
+      }
+    }
+
+    async function clearManualLocation() {
+      manualLocation = null;
+      localStorage.removeItem("manualLocation");
+      userLatitude = null;
+      userLongitude = null;
+      document.getElementById("locationStatus").textContent = "Auto-detecting...";
+      locationReady = requestBrowserLocation();
+      await ensureLocation();
+      updateLocationStatusDisplay();
+    }
+
+    locationReady.then(updateLocationStatusDisplay);
+
     const searchInput = document.getElementById("searchInput");
     const loading = document.getElementById("loading");
     const error = document.getElementById("error");
@@ -306,6 +415,7 @@
     const resultsBox = document.getElementById("results");
 
     searchInput.addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+    document.getElementById("locationInput").addEventListener("keydown", (e) => { if (e.key === "Enter") setManualLocation(); });
 
     function scoreLabel(score) {
       if (score >= 80) return "strong match";
@@ -458,6 +568,12 @@
         if (r.website) {
           actionsHtml += `<a class="card-map-btn" href="${r.website}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-world"></i> Website</a>`;
         }
+        // Google Places has no dedicated menu field — this is a search
+        // shortcut, not a confirmed official menu link. It works even when
+        // there's no website at all, and the search happens in the user's
+        // own browser, so Google localizes it without us needing to embed
+        // an address in the query.
+        actionsHtml += `<a class="card-map-btn" href="https://www.google.com/search?q=${encodeURIComponent(r.name + " menu")}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-book-2"></i> Menu</a>`;
 
         resultsBox.innerHTML += `
           <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="this.classList.toggle('expanded')">
@@ -574,7 +690,7 @@
         const tagsHtml = renderTags(a);
 
         const locationWarningHtml = usedApproximateLocation
-          ? `<div class="analysis-interpretation" style="color:#a45c28;">⚠ Using an approximate location from your network, not your device's GPS — results may be centered on the wrong area. Allow location access in your browser for accurate results.</div>`
+          ? `<div class="analysis-interpretation" style="color:#a45c28;">⚠ Your location looks imprecise (network-based or low-confidence GPS) — results may be centered on the wrong area.</div>`
           : "";
 
         analysisBox.innerHTML = `
@@ -645,7 +761,10 @@
         mapEl.style.display = 'block';
         btnList.classList.remove('active');
         btnMap.classList.add('active');
-        document.getElementById('viewToggle').scrollIntoView({ behavior: 'smooth' });
+        // 'nearest' only scrolls if the toggle isn't already visible, instead
+        // of always jumping it to the top of the screen — switching tabs
+        // shouldn't feel like the page yanked control away from you.
+        document.getElementById('viewToggle').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         setTimeout(() => {
           map && map.invalidateSize();
           if (markers.length === 0) initMap(currentResults);

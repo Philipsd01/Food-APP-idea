@@ -239,8 +239,6 @@ body.dark .view-toggle {
     background: transparent;
     border: 0.5px solid var(--border);
     color: var(--ink-3);
-    text-decoration: line-through;
-    opacity: 0.7;
 }
 
 /* Constraint tags in the "What I understood" panel are removable — clicking
@@ -492,7 +490,6 @@ body.dark .view-toggle {
     font-size: 9px;
     color: var(--ink-3);
     text-align: right;
-    margin-top: 6px;
     letter-spacing: 0.06em;
 }
 
@@ -767,6 +764,72 @@ body.dark .view-toggle {
     font-family: var(--mono) !important;
 }
 
+.location-editor {
+    padding: 4px 16px 14px 44px;
+    cursor: default;
+}
+
+.location-status {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--ink-3);
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.location-input-row {
+    display: flex;
+    gap: 6px;
+}
+
+.location-input-row input {
+    flex: 1;
+    min-width: 0;
+    background: var(--card-bg);
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 12px;
+    outline: none;
+}
+
+.location-input-row input:focus {
+    border-color: var(--ink-2);
+}
+
+.location-input-row button {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: 8px;
+    padding: 0 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+}
+
+.location-reset-btn {
+    display: block;
+    background: none;
+    border: none;
+    color: var(--ember);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-decoration: underline;
+    padding: 8px 0 0;
+    cursor: pointer;
+}
+
+body.dark .location-input-row input {
+    background: var(--card-bg);
+    border-color: var(--border);
+    color: var(--ink);
+}
+
 .menu-footer {
     margin-top: auto;
     padding: 8px 0;
@@ -931,8 +994,6 @@ body.dark .card-tag.excluded {
     background: transparent;
     border: 0.5px solid var(--border);
     color: var(--ink-3);
-    text-decoration: line-through;
-    opacity: 0.5;
 }
 
 /* Dark card summary accent line */
@@ -1029,8 +1090,8 @@ body.dark .leaflet-popup-content strong {
 
 .card-footer {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    gap: 6px;
     margin-top: 6px;
 }
 

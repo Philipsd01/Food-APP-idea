@@ -281,9 +281,25 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
 // review text — pull phone/website in the same request (Contact-category
 // fields) instead of a second billed call, so "Call"/"Website" buttons don't
 // double the Place Details cost per search.
+// Reviews/phone/website don't change minute to minute, but a multi-turn
+// refinement session ("quiet ramen" → "cheap" → "no seafood") re-shortlists
+// mostly the same restaurants every turn — without this, each turn re-fetches
+// (and re-bills) Place Details for restaurants we already just looked up.
+// In-memory only: resets on restart, not shared across processes — fine for
+// a single-process POC; a real deployment would want Redis or similar.
+const PLACE_DETAILS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const placeDetailsCache = new Map(); // place_id -> { data, expiresAt }
+
 async function fetchPlaceDetails(placeId) {
   const empty = { reviews: [], phone: null, website: null };
   if (!placeId) return empty;
+
+  const cached = placeDetailsCache.get(placeId);
+  if (cached && cached.expiresAt > Date.now()) {
+    console.log(`Place Details cache hit: ${placeId}`);
+    return cached.data;
+  }
+
   try {
     const response = await axios.get(
       "https://maps.googleapis.com/maps/api/place/details/json",
@@ -291,11 +307,13 @@ async function fetchPlaceDetails(placeId) {
     );
     if (response.data.status !== "OK") return empty;
     const result = response.data.result || {};
-    return {
+    const data = {
       reviews: (result.reviews || []).map(r => r.text).filter(Boolean),
       phone: result.formatted_phone_number || null,
       website: result.website || null,
     };
+    placeDetailsCache.set(placeId, { data, expiresAt: Date.now() + PLACE_DETAILS_CACHE_TTL_MS });
+    return data;
   } catch (error) {
     console.error(`Place Details failed for ${placeId}:`, error.message);
     return empty;
@@ -691,6 +709,35 @@ app.post("/search", async (req, res) => {
   } catch (error) {
     console.error("Error:", error.message);
     res.status(500).json({ error: error.message || "Something went wrong" });
+  }
+});
+
+// Lets the user override automatic geolocation by typing an area instead —
+// needed when the device's own location is wrong or too imprecise to trust
+// (e.g. a laptop with no GPS/WiFi-positioning signal falling back to ~200km-
+// accurate IP estimation), and separately useful for planning a search in a
+// city the user isn't currently in.
+app.get("/geocode", async (req, res) => {
+  const address = req.query.address;
+  if (!address) return res.status(400).json({ error: "Missing address" });
+
+  try {
+    const response = await axios.get(
+      "https://maps.googleapis.com/maps/api/geocode/json",
+      { params: { address, key: GOOGLE_API_KEY } }
+    );
+    if (response.data.status !== "OK" || !response.data.results?.length) {
+      return res.status(404).json({ error: `Couldn't find "${address}"` });
+    }
+    const result = response.data.results[0];
+    res.json({
+      lat: result.geometry.location.lat,
+      lng: result.geometry.location.lng,
+      formatted_address: result.formatted_address,
+    });
+  } catch (error) {
+    console.error("Geocode failed:", error.message);
+    res.status(502).json({ error: "Geocoding failed" });
   }
 });
 
