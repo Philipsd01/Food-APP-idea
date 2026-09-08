@@ -267,15 +267,21 @@
       ];
     }
 
+    // Queries .loading-status fresh on every tick rather than caching the
+    // element once — the list skeleton and the map spinner each carry their
+    // own .loading-status paragraph, and the map one isn't inserted into the
+    // DOM until slightly after this function is first called, so a one-time
+    // lookup would only ever find the list's.
     function startProgressMessages(rawQuery, previousAnalysis) {
-      const label = document.getElementById("loadingStatus");
-      if (!label) return;
       const steps = buildProgressSteps(rawQuery, previousAnalysis);
       let step = 0;
-      label.textContent = steps[0];
+      const applyLabel = () => {
+        document.querySelectorAll(".loading-status").forEach(el => el.textContent = steps[step]);
+      };
+      applyLabel();
       progressInterval = setInterval(() => {
         step = (step + 1) % steps.length;
-        label.textContent = steps[step];
+        applyLabel();
       }, 1500);
     }
 
@@ -437,7 +443,8 @@
     function makePopupHtml(r, index) {
       const scoreClass = r.score >= 80 ? 'high' : r.score >= 50 ? 'medium' : 'low';
       const hasPrice = r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown';
-      const meta = [r.tags?.cuisine, formatDistance(r.distance_km), hasPrice ? r.tags.price : null].filter(Boolean).join(' · ');
+      const ratingLabel = r.rating ? `<span class="no-wrap">★ ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>` : null;
+      const meta = [r.tags?.cuisine, formatDistance(r.distance_km), ratingLabel, hasPrice ? r.tags.price : null].filter(Boolean).join(' · ');
       return `
         <div class="map-popup">
           <div class="map-popup-header">
@@ -533,6 +540,25 @@
             <p>Nothing quite fits what you're looking for</p>
             <p>Try broadening your search or describing what you want differently</p>
           </div>`;
+        // The map tab shows its own "Finding restaurants..." spinner while a
+        // search is in flight (written directly into #mapView, separate from
+        // the list's own loading state) — on zero results this early return
+        // used to skip past it entirely, leaving that spinner on screen
+        // forever with nothing telling the user the search had actually
+        // finished and come up empty.
+        if (document.getElementById('btnMap').classList.contains('active')) {
+          if (map) { map.remove(); }
+          map = null;
+          tileLayer = null;
+          markers = [];
+          document.getElementById('mapView').innerHTML = `
+            <div style="height:100%;display:flex;align-items:center;justify-content:center;padding:24px;">
+              <div class="no-results">
+                <p>Nothing quite fits what you're looking for</p>
+                <p>Try broadening your search or describing what you want differently</p>
+              </div>
+            </div>`;
+        }
         return;
       }
 
@@ -548,6 +574,10 @@
         let cardTagsHtml = "";
         if (r.tags) {
           if (r.tags.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${r.tags.cuisine}</span>`;
+          // Our own match score already shows as the big number on the
+          // card — this is Google's independent rating, the number a user
+          // can actually cross-check against Maps/TripAdvisor themselves.
+          if (r.rating) cardTagsHtml += `<span class="card-tag rating"><i class="ti ti-star-filled"></i> ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>`;
           if (r.tags.price) cardTagsHtml += `<span class="card-tag price">${r.tags.price}</span>`;
           const distanceLabel = formatDistance(r.distance_km);
           if (distanceLabel) cardTagsHtml += `<span class="card-tag highlight">${distanceLabel}</span>`;
@@ -567,12 +597,14 @@
           ? `<img class="card-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()">`
           : "";
 
-        // Directions needs only coordinates we already have — no extra API
-        // call. Call/Website depend on Place Details having returned them
-        // (not every listing has both), so those two are conditional.
+        // Directions used to open Google Maps in a new tab — now that we
+        // draw our own route with mode + distance/time, it just switches to
+        // our map view instead (defaulting to driving, same as before).
+        // Call/Website depend on Place Details having returned them (not
+        // every listing has both), so those two stay conditional.
         let actionsHtml = "";
         if (r.latitude && r.longitude) {
-          actionsHtml += `<a class="card-map-btn" href="https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-directions"></i> Directions</a>`;
+          actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); showRouteOnMap(${index}, 'driving')"><i class="ti ti-directions"></i> Directions</button>`;
         }
         if (r.phone) {
           actionsHtml += `<a class="card-map-btn" href="tel:${r.phone}" onclick="event.stopPropagation()"><i class="ti ti-phone"></i> Call</a>`;
@@ -590,6 +622,21 @@
         const escapedName = r.name.replace(/'/g, "\\'");
         const isSaved = isRestaurantSaved(r.name);
 
+        // Answering a question needs real review text, which only exists
+        // server-side keyed by place_id — a brand/name search occasionally
+        // returns a restaurant Claude's scoring response didn't name-match
+        // back to filteredData (see searchRestaurants' merge step), so
+        // place_id can be missing. Skip the box rather than offer a feature
+        // that would just error.
+        const askBoxHtml = r.place_id ? `
+            <div class="ask-box" onclick="event.stopPropagation()">
+              <div class="ask-row">
+                <input type="text" class="ask-input" id="askInput-${index}" placeholder="Ask about this place..." onkeydown="if(event.key==='Enter') askRestaurantQuestion(${index})">
+                <button class="ask-btn" onclick="askRestaurantQuestion(${index})" title="Ask"><i class="ti ti-send"></i></button>
+              </div>
+              <p class="ask-answer" id="askAnswer-${index}"></p>
+            </div>` : "";
+
         resultsBox.innerHTML += `
           <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="this.classList.toggle('expanded')">
             ${photoHtml}
@@ -606,6 +653,7 @@
               ${r.score < 80 ? `<p class="card-score-hint">${scoreHint(r.score)}</p>` : ''}
             <p class="card-summary">${r.summary}</p>
             ${evidenceHtml}
+            ${askBoxHtml}
             <div class="card-footer">
               <div class="card-actions">
                 <button class="card-map-btn" onclick="event.stopPropagation(); focusOnMap(${index})">
@@ -617,6 +665,43 @@
             </div>
           </div>`;
       });
+    }
+
+    async function askRestaurantQuestion(index) {
+      const r = currentResults[index];
+      const inputEl = document.getElementById(`askInput-${index}`);
+      const answerEl = document.getElementById(`askAnswer-${index}`);
+      if (!r || !inputEl || !answerEl) return;
+
+      const question = inputEl.value.trim();
+      if (!question) return;
+
+      inputEl.disabled = true;
+      answerEl.textContent = "Thinking…";
+      answerEl.classList.add("loading");
+
+      try {
+        const response = await fetch("/ask-restaurant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            placeId: r.place_id,
+            name: r.name,
+            question,
+            tags: r.tags,
+            summary: r.summary,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Something went wrong");
+        answerEl.textContent = data.answer;
+      } catch (err) {
+        answerEl.textContent = err.message || "Couldn't get an answer.";
+      } finally {
+        answerEl.classList.remove("loading");
+        inputEl.disabled = false;
+        inputEl.value = "";
+      }
     }
 
     function toggleDistanceUnit() {
@@ -659,7 +744,6 @@
           <div class="skeleton-line text1"></div>
           <div class="skeleton-line text2"></div>
         </div>`;
-      startProgressMessages(query, currentAnalysis);
 
       const activeView = document.getElementById('btnMap').classList.contains('active') ? 'map' : 'list';
       isLoading = true;
@@ -674,7 +758,7 @@
           <div style="height:100%;display:flex;align-items:center;justify-content:center;background:var(--paper-2);border-radius:12px;">
             <div style="text-align:center;color:var(--ink-3);">
               <div class="map-spinner"></div>
-              <p style="margin-top:12px;font-size:13px;font-family:'DM Mono',monospace;letter-spacing:0.06em;">Finding restaurants...</p>
+              <p class="loading-status" style="margin-top:12px;margin-bottom:0;"></p>
             </div>
           </div>`;
         map = null;
@@ -683,6 +767,11 @@
         routeLine = null;
         routeTargetIndex = null;
       }
+
+      // Both possible loading UIs (list skeleton, map spinner) are in the
+      // DOM by now, whichever one is actually visible — start the shared
+      // staged-message cycle once so it reaches whichever one applies.
+      startProgressMessages(query, currentAnalysis);
 
       error.style.display = "none";
       searchInput.value = "";
@@ -727,6 +816,25 @@
 
         currentResults = data.results;
         renderResults(currentResults);
+
+        // "Directions to X" means the user already knows where they're
+        // going — skip making them tap into the list and hit Directions
+        // themselves, jump straight to the map with the route drawn.
+        // Results are already sorted by score, and a directions query is a
+        // name search (forced to 90+), so index 0 is the intended place.
+        if (a.wants_directions && currentResults.length > 0 && currentResults[0].latitude && currentResults[0].longitude) {
+          showRouteOnMap(0, 'driving');
+        } else if (
+          a.is_brand && currentResults.length > 0 &&
+          document.getElementById('btnMap').classList.contains('active') &&
+          markers[0]
+        ) {
+          // Already looking at the map and searched a specific restaurant by
+          // name — the marker alone doesn't say "this is the one you asked
+          // for" without tapping it, so open its popup instead of leaving
+          // that as an extra step.
+          markers[0].openPopup();
+        }
 
         searchInput.placeholder = '↳ refine: "but cheaper" or "with outdoor seating"';
 

@@ -215,6 +215,23 @@ body.dark .view-toggle {
     color: var(--ink-2);
 }
 
+/* Google's own rating, not our AI match score — a number the user can
+   cross-check elsewhere, so it gets its own visual identity (gold star)
+   rather than blending into the neutral outlined tags. */
+.card-tag.rating {
+    background: transparent;
+    border: 0.5px solid var(--ink-2);
+    color: var(--ink-2);
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.card-tag.rating i {
+    color: #C99A2E;
+    font-size: 10px;
+}
+
 .card-tag.vibe {
     background: transparent;
     border: 0.5px solid var(--ember-light);
@@ -509,6 +526,81 @@ body.dark .view-toggle {
 
 .evidence-quote {
     color: var(--ember);
+}
+
+/* Ask about this restaurant — collapses/expands with the rest of the
+   card's extra content, same as .evidence above. */
+.ask-box {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+    padding-top: 0;
+}
+
+.card.expanded .ask-box {
+    max-height: 200px;
+    opacity: 1;
+    padding-top: 10px;
+}
+
+.ask-row {
+    display: flex;
+    gap: 6px;
+}
+
+.ask-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--paper-2);
+    border: 0.5px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-family: var(--sans);
+    color: var(--ink);
+}
+
+.ask-input:focus {
+    outline: none;
+    border-color: var(--ember-light);
+}
+
+.ask-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    background: none;
+    border: 0.5px solid var(--border);
+    border-radius: 50%;
+    color: var(--ink-3);
+    cursor: pointer;
+    font-size: 13px;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.ask-btn:hover {
+    color: var(--ember);
+    border-color: var(--ember);
+}
+
+.ask-answer {
+    margin: 8px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--ink-2);
+}
+
+.ask-answer:empty {
+    margin: 0;
+}
+
+.ask-answer.loading {
+    color: var(--ink-3);
+    font-style: italic;
 }
 
 .card-expand-hint {
@@ -1260,6 +1352,13 @@ body.dark .card-map-btn:hover {
     letter-spacing: 0.06em;
     color: var(--ink-3);
     margin-bottom: 8px;
+}
+
+/* Keeps a rating value and its review count from wrapping apart onto
+   separate lines when the meta line itself wraps (the line as a whole can
+   still break at the surrounding " · " separators). */
+.no-wrap {
+    white-space: nowrap;
 }
 
 .map-popup-divider {

@@ -166,7 +166,8 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
 
   const locationHint = analysis.location ? ` near ${analysis.location}` : "";
 
-  // Don't append "restaurant" for brand/chain searches — it confuses Google Places.
+  // Don't append "restaurant" when the user is searching by an actual
+  // restaurant name — chain or independent — it confuses Google Places.
   // Was previously inferred as "!cuisine && dish", which is also true for any
   // plain dish search (e.g. "pizza") — that stripped "restaurant" and the
   // type=restaurant filter from every dish-only query, degrading results
@@ -348,7 +349,8 @@ CUISINE RULES:
 - If the user specifies a specific dish (e.g. "wagyu", "ramen", "carbonara"), set "dish" and set "cuisine" to null. Do NOT keep a generic cuisine tag when a specific dish has been named. Set "is_brand" to false — a dish name is not a brand.
 - If the user says "Japanese or Italian", set cuisine to "Japanese or Italian" exactly.
 - Never infer a sub-cuisine (e.g. "sushi") from a broad term like "Japanese" — keep it broad.
-- If the user names a specific restaurant chain or brand (e.g. "Starbucks", "McDonald's", "Ippudo", "Ichiran"), set "dish" to that brand name, set "cuisine" to null, and set "is_brand" to true. This is the ONLY case where "is_brand" should be true — it controls whether "restaurant" gets appended to the Google Places query, and appending it to an actual brand name (e.g. "Starbucks restaurant") confuses the search.
+- If the user names a specific restaurant — whether a chain/brand (e.g. "Starbucks", "McDonald's", "Ippudo", "Ichiran") or a single independent place by its actual name (e.g. "find Pizzarella", "is Coq en Pate open") — set "dish" to that exact name, set "cuisine" to null, and set "is_brand" to true. This is the ONLY case where "is_brand" should be true — it controls whether "restaurant" gets appended to the Google Places query (appending it to an actual name, e.g. "Starbucks restaurant" or "Pizzarella restaurant", confuses the search) and whether scoring is by name match instead of cuisine/vibe fit. Do NOT set it for a generic craving like "pizza" or "a cozy Italian place" — only an actual proper name the user is searching for by that name.
+- When "is_brand" is true, naming a different specific restaurant is never a continuation of whatever the previous search was about — it's its own standalone lookup, even if "intent" comes out as "refine" or "pivot" for other reasons. Keep "interpretation" to something like "Search for a restaurant called X" — do NOT describe it as refining, pivoting from, or otherwise related to the previous search.
 
 ATMOSPHERE RULES:
 - "quiet", "relaxed", "peaceful", "chill", "unwind", "low-key" mean LOW NOISE and CASUAL PACE — NOT upscale, NOT omakase, NOT formal. Only use "upscale" or "fine dining" atmosphere if the user explicitly says those words.
@@ -362,11 +364,16 @@ PROXIMITY RULES:
 - "X minute drive", "driving distance" → mode: "driving", minutes: X or null.
 - If the query says nothing at all about proximity or travel time, set "proximity" to null entirely (not an object).
 
+DIRECTIONS RULE:
+- Set "wants_directions" to true ONLY if the user is explicitly asking to navigate/route to a place — "directions to X", "how do I get to X", "navigate to X", "take me to X", "route to X". This is about wanting to go there right now, not about researching or discovering options.
+- A plain "find X" or "is X open" is NOT a directions request — set it false.
+
 Respond ONLY with a valid JSON object. No comments, no extra text, no markdown:
 {
   "cuisine": "specific cuisine, 'Japanese or Italian', or null",
   "dish": "specific dish or null",
-  "is_brand": true or false — true ONLY if "dish" is a restaurant chain/brand name (e.g. Starbucks, Ippudo), false for a generic dish (e.g. pizza, ramen) or when dish is null,
+  "is_brand": true or false — true ONLY if "dish" is an actual restaurant name the user searched for by name, chain or independent (e.g. Starbucks, Ippudo, Pizzarella), false for a generic dish (e.g. pizza, ramen) or when dish is null,
+  "wants_directions": true or false — true only per the DIRECTIONS RULE above,
   "atmosphere": "vibe or null",
   "occasion": "occasion or null",
   "audience": "who they are dining with or null",
@@ -446,11 +453,13 @@ function mergeAnalysis(previousAnalysis, newAnalysis) {
   const newMustNot = newAnalysis.must_not || [];
   merged.must_not = [...new Set([...prevMustNot, ...newMustNot])];
 
-  // Always reflects the latest turn.
+  // Always reflects the latest turn — "directions to X" this turn shouldn't
+  // keep auto-jumping to the map on every later refinement.
   merged.priority = newAnalysis.priority;
   merged.time_sensitive = newAnalysis.time_sensitive;
   merged.interpretation = newAnalysis.interpretation;
   merged.intent = newAnalysis.intent;
+  merged.wants_directions = newAnalysis.wants_directions === true;
 
   return merged;
 }
@@ -560,7 +569,7 @@ SCORING RULES:
 - CUISINE IS THE HIGHEST PRIORITY. Wrong cuisine = max score 35. Right cuisine = base score 60.
 - If the user said "Japanese or Italian", both cuisines are equally valid — return a balanced mix, do NOT favour one over the other.
 - If a specific dish was requested (e.g. wagyu, ramen), heavily weight restaurants likely to serve that dish.
-- If "is_brand" is true (a specific brand/chain like Starbucks or McDonald's was requested), the ONLY criteria is whether the restaurant name matches that brand. Score any matching location 90+. Ignore cuisine scoring entirely for brand searches.
+- If "is_brand" is true (the user searched for a specific restaurant by name — a chain like Starbucks or an independent place like "Pizzarella"), the ONLY criteria is whether the restaurant name matches. Score any matching location 90+. Ignore cuisine scoring entirely for name searches.
 - Factor in distance_km: under ${radiusKm} km = great, under ${Math.round(radiusKm * 2 * 10) / 10} km = good, under ${Math.round(radiusKm * 3 * 10) / 10} km = acceptable.
 - If a specific location or landmark was requested, prioritise restaurants closest to it.
 - "must_not" items are HARD DISQUALIFIERS — score below 20 if matched.
@@ -600,14 +609,65 @@ Respond ONLY with a JSON array, no other text:
   }
   const scored = JSON.parse(raw.slice(start, end + 1));
 
-  // Claude's scoring response only carries name/score/summary/etc — phone and
-  // website live on filteredData (from the Place Details enrichment above)
-  // and need to be reattached so the client can render Call/Website buttons.
+  // Claude's scoring response only carries name/score/summary/etc — phone,
+  // website, Google's own rating, and place_id all live on filteredData
+  // (from the Place Details enrichment above / the original Places fields)
+  // and need to be reattached so the client can render Call/Website buttons,
+  // show the real rating alongside our own match score, and (place_id) ask
+  // follow-up questions about a specific restaurant later.
   return scored.map(r => {
     const match = filteredData.find(d => d.name === r.name);
-    return match ? { ...r, phone: match.phone, website: match.website } : r;
+    return match ? { ...r, phone: match.phone, website: match.website, rating: match.rating, review_count: match.review_count, place_id: match.place_id } : r;
   });
 }
+
+// Answers a free-form question about one already-found restaurant, grounded
+// only in what we actually know about it (the same real review excerpts
+// used for scoring, plus the summary/tags already shown) — Haiku is fast
+// enough here that this doesn't need the staged-progress treatment /search
+// gets, and there's nothing to classify, so no analyzeQuery step.
+async function askAboutRestaurant(name, reviews, tags, summary, question) {
+  const reviewText = reviews && reviews.length > 0
+    ? reviews.map(r => `"${r}"`).join("\n")
+    : "No customer reviews available.";
+
+  const response = await client.messages.create({
+    model: "claude-haiku-4-5",
+    max_tokens: 300,
+    messages: [{
+      role: "user",
+      content: `Answer a question about a specific restaurant for someone deciding whether to go. Only use the information given below — never invent hours, menu items, prices, or reviews that aren't there. If the answer isn't in the given information, say that plainly instead of guessing.
+
+Restaurant: ${name}
+What we know: ${summary || "nothing beyond the name"}
+Tags: ${JSON.stringify(tags || {})}
+Customer reviews:
+${reviewText}
+
+Question: ${question}
+
+Answer in 1-3 short, direct, conversational sentences.`,
+    }],
+  });
+
+  return extractText(response, "askAboutRestaurant").trim();
+}
+
+app.post("/ask-restaurant", async (req, res) => {
+  const { placeId, name, question, tags, summary } = req.body;
+  if (!placeId || !name || !question) {
+    return res.status(400).json({ error: "placeId, name, and question are required" });
+  }
+
+  try {
+    const details = await fetchPlaceDetails(placeId);
+    const answer = await askAboutRestaurant(name, details.reviews, tags, summary, question);
+    res.json({ answer });
+  } catch (error) {
+    console.error("Ask-restaurant error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 app.post("/search", async (req, res) => {
   const userQuery = req.body.query || null;
@@ -629,7 +689,11 @@ app.post("/search", async (req, res) => {
     let isPivotOrNew;
 
     if (directAnalysis) {
-      analysis = { ...directAnalysis, intent: "refine" };
+      // Tag removal / rerunning a saved history entry replay the last
+      // analysis as-is — neither is itself a directions request, so don't
+      // let a stale true from whatever search this analysis came from
+      // silently re-trigger the map auto-jump.
+      analysis = { ...directAnalysis, intent: "refine", wants_directions: false };
       analysis.interpretation = await regenerateInterpretation(analysis);
       isPivotOrNew = false;
       console.log("Using edited analysis (tag removed):", JSON.stringify(analysis));
