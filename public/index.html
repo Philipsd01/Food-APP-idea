@@ -7,6 +7,7 @@
   <title>Restaurant Discovery</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -173,6 +174,10 @@
     let map = null;
     let tileLayer = null;
     let markers = [];
+    let routeLine = null;
+    let routingRouters = {};
+    let routeMode = "driving";
+    let routeTargetIndex = null;
     let currentResults = [];
     let isLoading = false;
     let lastQuery = "";
@@ -444,6 +449,13 @@
           ${r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown' ? `<div class="map-popup-price">${r.tags.price}</div>` : ''}
           <div class="map-popup-footer">
             <button class="map-popup-list-btn" onclick="focusOnList(${index})">View in list</button>
+            ${(r.latitude && r.longitude) ? `
+            <div class="map-popup-route-btns">
+              <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'driving')" title="Route by car"><i class="ti ti-car"></i></button>
+              <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'cycling')" title="Route by bike"><i class="ti ti-bike"></i></button>
+              <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'walking')" title="Route by foot"><i class="ti ti-walk"></i></button>
+              <button class="map-popup-route-btn" onclick="clearRoute()" title="Clear route"><i class="ti ti-x"></i></button>
+            </div>` : ''}
           </div>
         </div>`;
     }
@@ -668,6 +680,8 @@
         map = null;
         tileLayer = null;
         markers = [];
+        routeLine = null;
+        routeTargetIndex = null;
       }
 
       error.style.display = "none";
@@ -972,6 +986,7 @@
       } else {
         markers.forEach(m => m.remove());
         markers = [];
+        clearRoute();
         if (results.length > 0 && results[0].latitude) {
           map.setView([results[0].latitude, results[0].longitude], 15);
         }
@@ -1035,6 +1050,78 @@
           }, 50);
         }
       }, 250);
+    }
+
+    // These are free public OSRM instances (OSRM's own driving-only demo,
+    // plus OpenStreetMap Germany's bike/foot demos) — no API key, so no
+    // request-signing or key-restriction setup, but also no production SLA.
+    // Fine for a POC; each mode is a genuinely separate routing engine, not
+    // the same result relabeled.
+    const ROUTE_SERVERS = {
+      driving: { url: "https://router.project-osrm.org/route/v1", icon: "ti-car", label: "Car" },
+      cycling: { url: "https://routing.openstreetmap.de/routed-bike/route/v1", icon: "ti-bike", label: "Bike" },
+      walking: { url: "https://routing.openstreetmap.de/routed-foot/route/v1", icon: "ti-walk", label: "Walk" },
+    };
+
+    function formatDuration(totalSeconds) {
+      const mins = Math.round(totalSeconds / 60);
+      if (mins < 60) return `${mins} min`;
+      return `${Math.floor(mins / 60)}h ${mins % 60}min`;
+    }
+
+    // Only the route line is ours to draw — Leaflet Routing Machine's own
+    // waypoint markers/itinerary panel would duplicate our numbered pins and
+    // clash with the app's own map chrome, so we call its OSRM router
+    // directly and render the geometry as a plain polyline. Mode selection
+    // and clearing live in the marker popup itself (see makePopupHtml) —
+    // an earlier separate floating control duplicated those same buttons
+    // and got removed as redundant.
+    function showRouteOnMap(index, mode) {
+      const r = currentResults[index];
+      if (!r || !r.latitude || !r.longitude) return;
+      if (userLatitude == null || userLongitude == null) return;
+
+      routeTargetIndex = index;
+      if (mode) routeMode = mode;
+      switchView('map');
+
+      setTimeout(() => {
+        map.invalidateSize();
+        // The popup stays anchored over the marker after a button inside it
+        // is clicked — for a short route that hides the line (and its time
+        // label) entirely behind the popup card, so close it once a route
+        // is on its way.
+        map.closePopup();
+        drawRoute();
+      }, 250);
+    }
+
+    function drawRoute() {
+      const r = currentResults[routeTargetIndex];
+      if (!r || !map) return;
+
+      if (!routingRouters[routeMode]) {
+        routingRouters[routeMode] = L.Routing.osrmv1({ serviceUrl: ROUTE_SERVERS[routeMode].url });
+      }
+
+      routingRouters[routeMode].route(
+        [L.Routing.waypoint(L.latLng(userLatitude, userLongitude)), L.Routing.waypoint(L.latLng(r.latitude, r.longitude))],
+        (err, routes) => {
+          if (err || !routes || !routes.length) return;
+          if (routeLine) map.removeLayer(routeLine);
+          const distKm = routes[0].summary.totalDistance / 1000;
+          const label = `${formatDistance(distKm)} · ${formatDuration(routes[0].summary.totalTime)}`;
+          routeLine = L.polyline(routes[0].coordinates, { color: '#8B3A1F', weight: 4, opacity: 0.8 })
+            .bindTooltip(label, { permanent: true, direction: 'top', className: 'route-tooltip' })
+            .addTo(map);
+          map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+        }
+      );
+    }
+
+    function clearRoute() {
+      if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+      routeTargetIndex = null;
     }
 
     function toggleTheme() {
