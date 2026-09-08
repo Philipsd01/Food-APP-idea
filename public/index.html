@@ -436,7 +436,8 @@
 
     function makePopupHtml(r, index) {
       const scoreClass = r.score >= 80 ? 'high' : r.score >= 50 ? 'medium' : 'low';
-      const meta = [r.tags?.cuisine, formatDistance(r.distance_km)].filter(Boolean).join(' · ');
+      const hasPrice = r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown';
+      const meta = [r.tags?.cuisine, formatDistance(r.distance_km), hasPrice ? r.tags.price : null].filter(Boolean).join(' · ');
       return `
         <div class="map-popup">
           <div class="map-popup-header">
@@ -446,7 +447,6 @@
           <div class="map-popup-meta">${meta}</div>
           <div class="map-popup-divider"></div>
           <div class="map-popup-summary">${r.summary}</div>
-          ${r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown' ? `<div class="map-popup-price">${r.tags.price}</div>` : ''}
           <div class="map-popup-footer">
             <button class="map-popup-list-btn" onclick="focusOnList(${index})">View in list</button>
             ${(r.latitude && r.longitude) ? `
@@ -1006,7 +1006,12 @@
           icon: makeNumberedPin(index + 1)
         })
           .addTo(map)
-          .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' });
+          .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' })
+          // Opening a different restaurant's popup while a route from an
+          // earlier click is still on the map leaves a stray distance/time
+          // label with nothing on screen to tie it to — so switching to
+          // another restaurant drops whatever route doesn't belong to it.
+          .on('popupopen', () => { if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute(); });
         // Indexed, not pushed — a restaurant with no coordinates gets skipped
         // above without advancing this array, so push() would silently drift
         // every later marker's position out of sync with currentResults[index]
@@ -1145,7 +1150,8 @@
             icon: makeNumberedPin(index + 1)
           })
             .addTo(map)
-            .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' });
+            .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' })
+            .on('popupopen', () => { if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute(); });
           markers[index] = marker;
         });
       }

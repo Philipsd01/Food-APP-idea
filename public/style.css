@@ -1275,13 +1275,6 @@ body.dark .card-map-btn:hover {
     margin-bottom: 6px;
 }
 
-.map-popup-price {
-    font-family: var(--mono);
-    font-size: 9px;
-    letter-spacing: 0.06em;
-    color: var(--ink-3);
-    text-align: right;
-}
 
 /* Dark mode popup */
 body.dark .custom-popup .leaflet-popup-content-wrapper {
