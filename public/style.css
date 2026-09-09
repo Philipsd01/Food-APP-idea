@@ -147,9 +147,18 @@ body.dark .view-toggle {
     font-weight: 400;
     color: var(--ink);
     text-align: center;
-    margin-bottom: 28px;
+    margin-bottom: 8px;
     line-height: 1.3;
     transition: font-size 0.3s ease;
+}
+
+.header-subtitle {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink-3);
+    text-align: center;
+    margin-bottom: 24px;
+    line-height: 1.4;
 }
 
 .header-title em {
@@ -303,6 +312,254 @@ body.dark .view-toggle {
     border-color: var(--ink-2);
 }
 
+/* Everything on this block is start-screen-only content — shown by
+   startSuggestionChips(), hidden by stopSuggestionChips() once a real
+   search has run (see index.html). */
+.start-screen-extra {
+    margin-top: 36px;
+    margin-bottom: 8px;
+}
+
+.chips-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    text-align: center;
+    margin-bottom: 6px;
+}
+
+/* A 3D carousel of real cards (see applyWheelTransforms in index.html): 3
+   cards positioned in 3D space on a circle via perspective + translate3d,
+   one step of the wheel every ~3.8s. Sized to actually use the space below
+   the search box rather than sitting as a small floating row. */
+.suggestion-chips {
+    position: relative;
+    height: 210px;
+    margin-bottom: 8px;
+    perspective: 900px;
+    /* Fades the side cards toward the background near the container edges
+       instead of letting them stop abruptly — reads as depth, not a crop. */
+    -webkit-mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+    mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+}
+
+.suggestion-chip {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 190px;
+    display: flex;
+    flex-direction: column;
+    background: var(--card-bg);
+    border: 0.5px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.18);
+    cursor: pointer;
+    /* A slight overshoot-then-settle curve (rather than a flat ease) is
+       what makes the rotation read as physical/springy instead of robotic. */
+    transition: transform 1s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.9s ease,
+        box-shadow 0.4s ease, border-color 0.4s ease;
+}
+
+/* Plain-text fallback (showcase not loaded yet, or failed) — no photo, so
+   it's just a centered line filling the same card footprint, keeping the
+   wheel's geometry consistent whichever state a card is in. */
+.suggestion-chip:not(.with-photo) {
+    align-items: center;
+    justify-content: center;
+    height: 130px;
+    padding: 20px 18px;
+    text-align: center;
+    font-family: var(--sans);
+    font-size: 14px;
+    color: var(--ink-2);
+    line-height: 1.4;
+}
+
+.chip-photo {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+    display: block;
+}
+
+.chip-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    padding: 10px 14px 12px;
+    line-height: 1.3;
+}
+
+.chip-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.chip-name {
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chip-rating {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-2);
+}
+
+.chip-rating i {
+    font-size: 10px;
+    color: #C99A2E;
+}
+
+.suggestion-chip:hover {
+    border-color: var(--ember-light);
+}
+
+/* The card currently in focus gets real visual weight — an ember-tinted
+   frame and a soft glow — instead of just being the biggest blob among
+   three identical outlines. */
+.suggestion-chip.front {
+    border-color: var(--ember);
+    box-shadow: 0 12px 32px -8px color-mix(in srgb, var(--ember) 45%, transparent);
+}
+
+/* Saved restaurants surfaced on the start screen (see renderFrontSaved in
+   index.html) — a reason to open the app even without a new craving. */
+.front-saved {
+    margin-top: 24px;
+}
+
+.saved-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+
+/* Same quality bar as the carousel (real photo, rounded card, subtle
+   shadow) but flat and static — no perspective/rotation/focus-glow — so
+   it reads as "a list you scroll" rather than a second carousel. */
+.saved-chip {
+    display: flex;
+    flex-direction: column;
+    width: 112px;
+    flex-shrink: 0;
+    background: var(--card-bg);
+    border: 0.5px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.15);
+    transition: border-color 0.2s;
+}
+
+.saved-chip:hover {
+    border-color: var(--ember-light);
+}
+
+.saved-chip-photo-wrap {
+    position: relative;
+    width: 100%;
+    height: 70px;
+    background: var(--paper-2);
+}
+
+.saved-chip-photo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.saved-chip-heart {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.4);
+    color: #fff;
+    font-size: 9px;
+}
+
+.saved-chip-name {
+    padding: 7px 9px 9px;
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* "How it works" — answers "what does this app do" without requiring a
+   search first, for whoever lands here not already knowing. */
+.how-it-works {
+    display: flex;
+    justify-content: center;
+    gap: 22px;
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 0.5px solid var(--border);
+}
+
+.how-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    max-width: 100px;
+}
+
+.how-step-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-bottom: 8px;
+    border-radius: 50%;
+    background: var(--card-bg);
+    border: 0.5px solid var(--border);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ember);
+}
+
+.how-step p {
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--ink-3);
+}
+
+@media (max-width: 380px) {
+    .how-it-works {
+        gap: 12px;
+    }
+}
+
 /* FIX 01: Send button — ink circle with cream arrow (not pure white) */
 .search-btn {
     background: var(--ink);
@@ -401,6 +658,7 @@ body.dark .view-toggle {
     margin: -14px -16px 12px -16px;
     border-radius: 12px 12px 0 0;
     background: var(--paper-2);
+    cursor: pointer;
 }
 
 .card-header {
@@ -497,6 +755,33 @@ body.dark .view-toggle {
     margin-bottom: 6px;
     border-left: 1.5px solid var(--ember);
     padding-left: 10px;
+}
+
+/* Extra photos beyond the card's hero shot — collapsed until the card is
+   expanded, same pattern as .evidence below (images are only requested at
+   that point, see loadExtraPhotos). */
+.photo-gallery {
+    max-height: 0;
+    overflow: hidden;
+    display: flex;
+    gap: 6px;
+    transition: max-height 0.3s ease;
+}
+
+.card.expanded .photo-gallery {
+    max-height: 90px;
+    margin-top: 10px;
+    overflow-x: auto;
+}
+
+.gallery-photo {
+    width: 90px;
+    height: 90px;
+    flex-shrink: 0;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 0.5px solid var(--border);
+    cursor: pointer;
 }
 
 /* Evidence */
@@ -1361,6 +1646,29 @@ body.dark .card-map-btn:hover {
     white-space: nowrap;
 }
 
+/* Marker name label — sits above each numbered pin so the name is visible
+   without opening every popup one by one. interactive:false on the binding
+   keeps it purely visual (clicks pass through to the marker underneath). */
+.marker-label {
+    background: var(--card-bg);
+    border: 0.5px solid var(--border);
+    border-radius: 5px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+    padding: 1px 6px;
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--ink);
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.marker-label::before {
+    border-top-color: var(--border);
+}
+
 .map-popup-divider {
     height: 0.5px;
     background: var(--border);
@@ -1495,4 +1803,97 @@ body.dark .card-tag.open-now {
     color: var(--ink-3);
     letter-spacing: 0.06em;
     margin-bottom: 6px;
+}
+
+/* ── Photo lightbox ── */
+.lightbox {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.88);
+    align-items: center;
+    justify-content: center;
+}
+
+.lightbox.open {
+    display: flex;
+}
+
+.lightbox-img {
+    max-width: 92vw;
+    max-height: 86vh;
+    object-fit: contain;
+    border-radius: 8px;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+/* Direction matches the swipe/arrow that triggered it — next comes in from
+   the right (where content "ahead" would be), prev from the left. */
+@keyframes lightboxSlideFromRight {
+    from { opacity: 0; transform: translateX(28px) scale(0.98); }
+    to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes lightboxSlideFromLeft {
+    from { opacity: 0; transform: translateX(-28px) scale(0.98); }
+    to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+.lightbox-img.slide-next {
+    animation: lightboxSlideFromRight 0.22s ease-out;
+}
+
+.lightbox-img.slide-prev {
+    animation: lightboxSlideFromLeft 0.22s ease-out;
+}
+
+.lightbox-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+.lightbox-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 20px;
+    cursor: pointer;
+}
+
+.lightbox-prev {
+    left: 12px;
+}
+
+.lightbox-next {
+    right: 12px;
+}
+
+@media (max-width: 520px) {
+    .lightbox-nav {
+        width: 34px;
+        height: 34px;
+    }
 }

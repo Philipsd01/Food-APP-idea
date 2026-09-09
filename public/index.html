@@ -134,6 +134,7 @@
 
     <p class="header-label">discover</p>
     <p class="header-title">Search smarter, eat better</p>
+    <p class="header-subtitle" id="headerSubtitle" style="display: none;">Understands &ldquo;quiet ramen for a rainy date night&rdquo; — not just keywords.</p>
 
     <div class="analysis" id="analysis"></div>
 
@@ -142,6 +143,32 @@
       <button class="search-btn" id="searchBtn" onclick="search()">
         <i class="ti ti-arrow-up"></i>
       </button>
+    </div>
+
+    <div class="start-screen-extra" id="startScreenExtra" style="display: none;">
+      <p class="chips-label">Try asking</p>
+      <div class="suggestion-chips" id="suggestionChips">
+        <button class="suggestion-chip" onclick="runSuggestion(this)"></button>
+        <button class="suggestion-chip" onclick="runSuggestion(this)"></button>
+        <button class="suggestion-chip" onclick="runSuggestion(this)"></button>
+      </div>
+
+      <div class="front-saved" id="frontSaved" style="display: none;"></div>
+
+      <div class="how-it-works" id="howItWorks">
+        <div class="how-step">
+          <span class="how-step-num">1</span>
+          <p>Describe what you want</p>
+        </div>
+        <div class="how-step">
+          <span class="how-step-num">2</span>
+          <p>We search &amp; score in real time</p>
+        </div>
+        <div class="how-step">
+          <span class="how-step-num">3</span>
+          <p>Get matches with reviews, hours &amp; routes</p>
+        </div>
+      </div>
     </div>
 
     <div class="loading" id="loading"></div>
@@ -161,6 +188,13 @@
       style="display: none; height: calc(100vh - 380px); min-height: 320px; max-height: 480px; border-radius: 12px; overflow: hidden; margin-top: 10px;">
     </div>
   </div>
+  </div>
+
+  <div class="lightbox" id="lightbox" onclick="if (event.target === this) closeLightbox()">
+    <button class="lightbox-close" onclick="closeLightbox()" title="Close"><i class="ti ti-x"></i></button>
+    <button class="lightbox-nav lightbox-prev" onclick="event.stopPropagation(); lightboxStep(-1)" title="Previous"><i class="ti ti-chevron-left"></i></button>
+    <img class="lightbox-img" id="lightboxImg" src="" alt="">
+    <button class="lightbox-nav lightbox-next" onclick="event.stopPropagation(); lightboxStep(1)" title="Next"><i class="ti ti-chevron-right"></i></button>
   </div>
 
   <script>
@@ -581,8 +615,17 @@
           if (r.tags.price) cardTagsHtml += `<span class="card-tag price">${r.tags.price}</span>`;
           const distanceLabel = formatDistance(r.distance_km);
           if (distanceLabel) cardTagsHtml += `<span class="card-tag highlight">${distanceLabel}</span>`;
-          if (r.open_now === true) cardTagsHtml += `<span class="card-tag open-now">Open now</span>`;
-          if (r.open_now === false) cardTagsHtml += `<span class="card-tag closed-now">Closed</span>`;
+          // hours_status ("Closes 10 PM", "Opens 11 AM tomorrow") comes from
+          // Place Details' actual schedule — falls back to the plain
+          // open/closed boolean when a place has no parsed hours at all.
+          if (r.hours_status) {
+            const hoursClass = r.open_now === false ? "closed-now" : "open-now";
+            cardTagsHtml += `<span class="card-tag ${hoursClass}">${r.hours_status}</span>`;
+          } else if (r.open_now === true) {
+            cardTagsHtml += `<span class="card-tag open-now">Open now</span>`;
+          } else if (r.open_now === false) {
+            cardTagsHtml += `<span class="card-tag closed-now">Closed</span>`;
+          }
         } else if (r.cuisine) {
           cardTagsHtml += `<span class="card-tag cuisine">${r.cuisine}</span>`;
         }
@@ -594,7 +637,7 @@
           ).join("")}</div>`;
         }
         const photoHtml = r.photo_reference
-          ? `<img class="card-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()">`
+          ? `<img class="card-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()" onclick="event.stopPropagation(); openLightboxFromCard(${index}, -1)">`
           : "";
 
         // Directions used to open Google Maps in a new tab — now that we
@@ -637,8 +680,15 @@
               <p class="ask-answer" id="askAnswer-${index}"></p>
             </div>` : "";
 
+        // Extra photos beyond the hero shot are only fetched once a card is
+        // actually expanded (see toggleCardExpand) — Google bills each photo
+        // separately, so this container starts empty rather than eagerly
+        // loading photos for cards nobody opens.
+        const hasExtraPhotos = r.photos && r.photos.filter(p => p !== r.photo_reference).length > 0;
+        const galleryHtml = hasExtraPhotos ? `<div class="photo-gallery" id="photoGallery-${index}"></div>` : "";
+
         resultsBox.innerHTML += `
-          <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="this.classList.toggle('expanded')">
+          <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="toggleCardExpand(this, ${index})">
             ${photoHtml}
             <div class="card-header">
               <span class="card-name">${r.name}</span>
@@ -652,6 +702,7 @@
             <div class="card-tags">${cardTagsHtml}</div>
               ${r.score < 80 ? `<p class="card-score-hint">${scoreHint(r.score)}</p>` : ''}
             <p class="card-summary">${r.summary}</p>
+            ${galleryHtml}
             ${evidenceHtml}
             ${askBoxHtml}
             <div class="card-footer">
@@ -666,6 +717,124 @@
           </div>`;
       });
     }
+
+    function toggleCardExpand(cardEl, index) {
+      cardEl.classList.toggle('expanded');
+      if (cardEl.classList.contains('expanded')) loadExtraPhotos(index);
+    }
+
+    function loadExtraPhotos(index) {
+      const r = currentResults[index];
+      const galleryEl = document.getElementById(`photoGallery-${index}`);
+      if (!r || !galleryEl || galleryEl.dataset.loaded) return;
+      galleryEl.dataset.loaded = "true";
+
+      // Keeps each thumbnail's position in r.photos (not the filtered/sliced
+      // list) so openLightboxFromCard can look the same ref back up there —
+      // avoids embedding the raw photo_reference string in an onclick attribute.
+      const extra = (r.photos || [])
+        .map((ref, pos) => ({ ref, pos }))
+        .filter(p => p.ref !== r.photo_reference)
+        .slice(0, 4);
+      galleryEl.innerHTML = extra.map(p =>
+        `<img class="gallery-photo" src="/photo?ref=${encodeURIComponent(p.ref)}" alt="" loading="lazy" onerror="this.remove()" onclick="event.stopPropagation(); openLightboxFromCard(${index}, ${p.pos})">`
+      ).join("");
+    }
+
+    let lightboxPhotos = [];
+    let lightboxIndex = 0;
+    let lightboxTouchStartX = null;
+
+    // Hero photo first, then whatever else is in r.photos with the hero's
+    // own ref deduped out — matches the order the card itself shows them in
+    // (hero, then the gallery strip), so swiping feels continuous with what
+    // was already on screen.
+    function buildPhotoList(r) {
+      const list = [];
+      if (r.photo_reference) list.push(r.photo_reference);
+      (r.photos || []).forEach(ref => { if (!list.includes(ref)) list.push(ref); });
+      return list;
+    }
+
+    function openLightboxFromCard(index, photoPos) {
+      const r = currentResults[index];
+      if (!r) return;
+      const list = buildPhotoList(r);
+      if (list.length === 0) return;
+      const startRef = photoPos === -1 ? r.photo_reference : (r.photos || [])[photoPos];
+      lightboxPhotos = list;
+      lightboxIndex = Math.max(0, list.indexOf(startRef));
+      renderLightboxImage();
+      document.getElementById('lightbox').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    function lightboxStep(delta) {
+      if (lightboxPhotos.length === 0) return;
+      lightboxIndex = (lightboxIndex + delta + lightboxPhotos.length) % lightboxPhotos.length;
+      renderLightboxImage(delta > 0 ? 'next' : 'prev');
+    }
+
+    // direction is omitted on open (no slide, it should just appear) and
+    // passed on next/prev so the incoming photo slides in from the side it
+    // conceptually came from, matching the swipe direction on mobile.
+    function renderLightboxImage(direction) {
+      const img = document.getElementById('lightboxImg');
+      const src = `/photo?ref=${encodeURIComponent(lightboxPhotos[lightboxIndex])}`;
+      updateLightboxNav();
+
+      const applyImage = () => {
+        img.src = src;
+        img.classList.remove('slide-next', 'slide-prev');
+        if (direction) {
+          void img.offsetWidth; // force reflow so the animation restarts even on repeated same-direction taps
+          img.classList.add(direction === 'next' ? 'slide-next' : 'slide-prev');
+        }
+      };
+
+      if (!direction) { applyImage(); return; } // opening fresh — nothing to preload against
+
+      // Setting img.src directly here would start the slide animation
+      // immediately while the <img> is still showing the PREVIOUS photo
+      // (an <img> doesn't blank out on a src change, it keeps the old frame
+      // until the new one finishes loading) — that read as "flashes the old
+      // photo, then swaps mid-animation" instead of a clean transition.
+      // Preloading off-screen first means the animation only starts once
+      // the new photo is actually the one about to be shown.
+      const preloader = new Image();
+      preloader.onload = applyImage;
+      preloader.onerror = applyImage;
+      preloader.src = src;
+    }
+
+    function updateLightboxNav() {
+      const multi = lightboxPhotos.length > 1;
+      document.querySelector('.lightbox-prev').style.display = multi ? 'flex' : 'none';
+      document.querySelector('.lightbox-next').style.display = multi ? 'flex' : 'none';
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (!document.getElementById('lightbox').classList.contains('open')) return;
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowLeft') lightboxStep(-1);
+      if (e.key === 'ArrowRight') lightboxStep(1);
+    });
+
+    const lightboxEl = document.getElementById('lightbox');
+    lightboxEl.addEventListener('touchstart', (e) => {
+      lightboxTouchStartX = e.touches[0].clientX;
+    }, { passive: true });
+    lightboxEl.addEventListener('touchend', (e) => {
+      if (lightboxTouchStartX === null) return;
+      const deltaX = e.changedTouches[0].clientX - lightboxTouchStartX;
+      if (Math.abs(deltaX) > 50) lightboxStep(deltaX < 0 ? 1 : -1);
+      lightboxTouchStartX = null;
+    }, { passive: true });
 
     async function askRestaurantQuestion(index) {
       const r = currentResults[index];
@@ -721,6 +890,8 @@
     async function search(directAnalysis) {
       const query = directAnalysis ? "" : searchInput.value.trim();
       if (!directAnalysis && !query) return;
+
+      stopSuggestionChips();
 
       // Only the immediately preceding message is needed here — analyzeQuery
       // uses it purely to detect refine/pivot/new signals ("but", "actually",
@@ -869,6 +1040,7 @@
       error.style.display = "none";
       document.getElementById('viewToggle').style.display = 'none';
       searchInput.focus();
+      startSuggestionChips();
     }
 
     function toggleSection(label) {
@@ -1114,6 +1286,7 @@
           icon: makeNumberedPin(index + 1)
         })
           .addTo(map)
+          .bindTooltip(r.name, { permanent: true, direction: 'top', offset: [0, -16], className: 'marker-label', interactive: false })
           .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' })
           // Opening a different restaurant's popup while a route from an
           // earlier click is still on the map leaves a stray distance/time
@@ -1258,11 +1431,240 @@
             icon: makeNumberedPin(index + 1)
           })
             .addTo(map)
+            .bindTooltip(r.name, { permanent: true, direction: 'top', offset: [0, -16], className: 'marker-label', interactive: false })
             .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' })
             .on('popupopen', () => { if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute(); });
           markers[index] = marker;
         });
       }
+    }
+
+    // Start-screen suggestion chips — the search box alone gave a first-time
+    // user no sense of what kind of thing this app actually understands.
+    // Each chip cycles independently through the pool so the screen feels
+    // alive rather than static, and tapping one runs that exact query
+    // through the normal search flow (not a link to any specific place —
+    // real nearby matches are what the rest of the app already does well).
+    const SUGGESTION_QUERIES = [
+      "cozy cafe nearby",
+      "best pizza in town",
+      "quiet ramen for a date night",
+      "cheap eats near me",
+      "try something new",
+      "upscale dinner for a special occasion",
+      "family-friendly brunch spot",
+      "good Italian, not too pricey",
+      "vegan-friendly and casual",
+      "somewhere with outdoor seating",
+    ];
+
+    let wheelAngle = 0;
+    let wheelInterval = null;
+
+    // Real nearby restaurants (name/rating/photo) from /showcase, once
+    // location resolves and the fetch succeeds — see loadShowcase(). Empty
+    // means "not ready yet" or "failed", in which case chips fall back to
+    // plain example-query text instead of sitting blank.
+    let showcaseItems = [];
+
+    function pickChipData(excludingKeys) {
+      if (showcaseItems.length > 0) {
+        const options = showcaseItems.filter(item => !excludingKeys.includes(item.name));
+        const pool = options.length > 0 ? options : showcaseItems;
+        return pool[Math.floor(Math.random() * pool.length)];
+      }
+      const options = SUGGESTION_QUERIES.filter(q => !excludingKeys.includes(q));
+      return options[Math.floor(Math.random() * options.length)];
+    }
+
+    function currentChipKeys() {
+      return Array.from(document.querySelectorAll('.suggestion-chip')).map(c => c.dataset.key);
+    }
+
+    // A chip is either a plain example-query string, or a showcase object
+    // ({label, query, name, rating, photo_reference}) — dataset.key/.query
+    // carry what runSuggestion and the exclude-what's-already-shown logic
+    // need, regardless of which shape is currently in it.
+    function renderChip(chip, data) {
+      if (typeof data === "string") {
+        chip.dataset.key = data;
+        chip.dataset.query = data;
+        chip.classList.remove('with-photo');
+        chip.innerHTML = `<span class="chip-text-only">${data}</span>`;
+        return;
+      }
+      chip.dataset.key = data.name;
+      chip.dataset.query = data.query;
+      chip.classList.add('with-photo');
+      // A 34px thumbnail can't read as an actual photo no matter how sharp
+      // it is — a full-width banner is what makes "here's a real photo"
+      // legible, not a resolution fix.
+      const photoHtml = data.photo_reference
+        ? `<img class="chip-photo" src="/photo?ref=${encodeURIComponent(data.photo_reference)}" alt="" onerror="this.remove()">`
+        : "";
+      chip.innerHTML = `${photoHtml}<span class="chip-text">
+        <span class="chip-label">${data.label}</span>
+        <span class="chip-name">${data.name}</span>
+        <span class="chip-rating"><i class="ti ti-star-filled"></i> ${data.rating}</span>
+      </span>`;
+    }
+
+    async function loadShowcase() {
+      // Only ever fetched once per session — startSuggestionChips() calls
+      // this on every "New Search" reset too, and re-hitting 3 Text Search
+      // calls each time for what's almost certainly the same location would
+      // be pure waste.
+      if (showcaseItems.length > 0) return;
+      const got = await ensureLocation();
+      if (!got || userLatitude == null || userLongitude == null) return;
+      try {
+        const res = await fetch(`/showcase?lat=${userLatitude}&lng=${userLongitude}`);
+        const data = await res.json();
+        if (data.items && data.items.length > 0) {
+          showcaseItems = data.items;
+          // Upgrade whatever's currently showing right away rather than
+          // waiting for each chip's next natural rotation — the reveal
+          // otherwise trickles in unevenly over the next ~10s.
+          const wrapper = document.getElementById('startScreenExtra');
+          if (wrapper && wrapper.style.display !== 'none') {
+            const used = [];
+            document.querySelectorAll('.suggestion-chip').forEach(chip => {
+              const item = pickChipData(used);
+              used.push(typeof item === "string" ? item : item.name);
+              renderChip(chip, item);
+            });
+          }
+        }
+      } catch (e) {
+        // Silent — showcaseItems just stays empty and chips keep using the
+        // plain-text fallback pool.
+      }
+    }
+
+    // Which of the 3 chips currently sits closest to the 0° (front-facing)
+    // position on the wheel.
+    function frontChipIndex() {
+      let best = 0, bestDiff = 361;
+      for (let i = 0; i < 3; i++) {
+        const angle = (wheelAngle + i * 120) % 360;
+        const diff = Math.min(angle, 360 - angle);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+      }
+      return best;
+    }
+
+    // Positions all 3 chips on a circle in 3D space via perspective +
+    // translate3d — front (angle≈0°) reads as closest/largest/brightest,
+    // the other two recede to the sides, which is what actually produces
+    // the "front, then back" carousel motion rather than a flat fade.
+    function applyWheelTransforms() {
+      const chips = document.querySelectorAll('.suggestion-chip');
+      chips.forEach((chip, i) => {
+        const angle = (wheelAngle + i * 120) % 360;
+        const rad = angle * Math.PI / 180;
+        const z = Math.cos(rad) * 90;
+        const x = Math.sin(rad) * 170;
+        const depth = (z + 90) / 180; // 0 = fully back, 1 = fully front
+        chip.style.transform = `translate(-50%, -50%) translate3d(${x.toFixed(1)}px, 0, ${z.toFixed(1)}px) scale(${(0.55 + 0.45 * depth).toFixed(2)})`;
+        chip.style.opacity = (0.35 + 0.65 * depth).toFixed(2);
+        chip.style.zIndex = Math.round(z + 100);
+        // Only the chip near angle≈0 ever reaches this depth (the other two
+        // sit at ≈0.25) — used to give the "in focus" one real visual
+        // weight instead of just being the biggest blob.
+        chip.classList.toggle('front', depth > 0.9);
+      });
+    }
+
+    function stepWheel() {
+      // The chip currently front-and-center is the one about to rotate
+      // away — refresh it now, while it's still the most visible, so
+      // viewers never see the next card "pop in" mid-rotation.
+      const chips = document.querySelectorAll('.suggestion-chip');
+      const front = chips[frontChipIndex()];
+      if (front) renderChip(front, pickChipData(currentChipKeys()));
+
+      wheelAngle = (wheelAngle + 120) % 360;
+      applyWheelTransforms();
+    }
+
+    function startSuggestionChips() {
+      const chips = document.querySelectorAll('.suggestion-chip');
+      if (chips.length === 0) return;
+      document.getElementById('startScreenExtra').style.display = 'block';
+
+      // Both are useful as a one-time walkthrough, redundant once someone's
+      // actually used the app before — search history already tells us
+      // that without needing a separate "have they seen this" flag.
+      const isReturningUser = loadSearchHistory().length > 0;
+      document.getElementById('howItWorks').style.display = isReturningUser ? 'none' : 'flex';
+      document.getElementById('headerSubtitle').style.display = isReturningUser ? 'none' : 'block';
+      renderFrontSaved();
+
+      wheelAngle = 0;
+      const used = [];
+      chips.forEach(chip => {
+        const data = pickChipData(used);
+        used.push(typeof data === "string" ? data : data.name);
+        renderChip(chip, data);
+      });
+      applyWheelTransforms();
+      wheelInterval = setInterval(stepWheel, 3800);
+      loadShowcase();
+    }
+
+    function stopSuggestionChips() {
+      if (wheelInterval) clearInterval(wheelInterval);
+      wheelInterval = null;
+      const el = document.getElementById('startScreenExtra');
+      if (el) el.style.display = 'none';
+      const subtitle = document.getElementById('headerSubtitle');
+      if (subtitle) subtitle.style.display = 'none';
+    }
+
+    // Saved restaurants, front and center on the start screen instead of
+    // buried in the menu — gives a reason to open the app even without a
+    // new craving (check hours, get directions to somewhere already
+    // chosen). Reuses the exact same external-directions link the saved
+    // menu already uses, rather than inventing a second interaction pattern.
+    function renderFrontSaved() {
+      const el = document.getElementById('frontSaved');
+      if (!el) return;
+      const saved = loadSavedRestaurants();
+      if (saved.length === 0) { el.style.display = 'none'; return; }
+
+      el.style.display = 'block';
+      el.innerHTML = `
+        <p class="chips-label">Your saved spots</p>
+        <div class="saved-row">
+          ${saved.slice(0, 8).map(r => {
+            const hasCoords = r.latitude && r.longitude;
+            const clickAttr = hasCoords
+              ? `onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}', '_blank')"`
+              : "";
+            // Same quality bar as the carousel (a real photo card) but
+            // deliberately flat and static — no perspective, no rotation,
+            // no "in focus" glow — so it reads as a plain scrollable list,
+            // not a second copy of the spotlight carousel above it. The
+            // photo sits in its own fixed-size wrapper so a missing/failed
+            // photo just shows the wrapper's own background instead of
+            // collapsing the card to a different height than its neighbors.
+            const photoHtml = r.photo_reference
+              ? `<img class="saved-chip-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()">`
+              : "";
+            return `<div class="saved-chip" ${clickAttr}>
+              <div class="saved-chip-photo-wrap">
+                ${photoHtml}
+                <i class="ti ti-heart-filled saved-chip-heart"></i>
+              </div>
+              <span class="saved-chip-name">${r.name}</span>
+            </div>`;
+          }).join("")}
+        </div>`;
+    }
+
+    function runSuggestion(btnEl) {
+      searchInput.value = btnEl.dataset.query || btnEl.textContent.trim();
+      search();
     }
 
     const saved = localStorage.getItem("theme");
@@ -1275,6 +1677,7 @@
     document.getElementById("maxResultsLabel").textContent = maxResults;
     renderSearchHistory();
     renderSavedRestaurantsMenu();
+    startSuggestionChips();
   </script>
 </body>
 

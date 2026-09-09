@@ -246,6 +246,12 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
       name: place.name,
       place_id: place.place_id,
       photo_reference: place.photos?.[0]?.photo_reference || null,
+      // Google doesn't label these by subject (food vs. interior vs.
+      // storefront) — this is just whatever mix of photos exists for the
+      // place, capped at 5. The client only fetches the extra ones (beyond
+      // the hero shot) when a card is actually expanded, to keep Photo API
+      // billing proportional to what's actually viewed.
+      photos: (place.photos || []).slice(0, 5).map(p => p.photo_reference).filter(Boolean),
       cuisine: term,
       location: place.vicinity || "",
       price: priceLevel(place.price_level) || (place.rating ? `Rated ${place.rating}★` : "See Google Maps"),
@@ -291,8 +297,58 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
 const PLACE_DETAILS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const placeDetailsCache = new Map(); // place_id -> { data, expiresAt }
 
+// Text Search's opening_hours.open_now is just a boolean — Place Details'
+// "periods" (day 0-6 Sun-Sat, "HHMM" local time at the place) has the actual
+// schedule, which lets us say *when* it opens/closes instead of just
+// open-or-not. Assumes the server's local time is a reasonable stand-in for
+// the restaurant's own — true for a single-city POC, would need the place's
+// real UTC offset (Google doesn't return one) for a multi-timezone app.
+function formatClockTime(hhmm) {
+  const hour = parseInt(hhmm.slice(0, 2), 10);
+  const minute = hhmm.slice(2);
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 || 12;
+  return minute === "00" ? `${hour12} ${period}` : `${hour12}:${minute} ${period}`;
+}
+
+function formatHoursStatus(periods) {
+  if (!periods || periods.length === 0) return null;
+
+  const alwaysOpen = periods.length === 1 && periods[0].open?.time === "0000" && !periods[0].close;
+  if (alwaysOpen) return "Open 24 hours";
+
+  const now = new Date();
+  const today = now.getDay();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const toMinutes = (t) => parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(2), 10);
+
+  for (const p of periods) {
+    if (!p.open || p.open.day !== today || !p.close) continue;
+    const openMin = toMinutes(p.open.time);
+    let closeMin = toMinutes(p.close.time);
+    if (p.close.day !== p.open.day) closeMin += 24 * 60; // closes after midnight
+    if (nowMinutes >= openMin && nowMinutes < closeMin) {
+      return `Closes ${formatClockTime(p.close.time)}`;
+    }
+  }
+
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  for (let offset = 0; offset < 7; offset++) {
+    const checkDay = (today + offset) % 7;
+    const upcoming = periods
+      .filter(p => p.open && p.open.day === checkDay && (offset > 0 || toMinutes(p.open.time) > nowMinutes))
+      .sort((a, b) => toMinutes(a.open.time) - toMinutes(b.open.time));
+    if (upcoming.length === 0) continue;
+    const label = formatClockTime(upcoming[0].open.time);
+    if (offset === 0) return `Opens ${label}`;
+    if (offset === 1) return `Opens ${label} tomorrow`;
+    return `Opens ${label} ${dayNames[checkDay]}`;
+  }
+  return null;
+}
+
 async function fetchPlaceDetails(placeId) {
-  const empty = { reviews: [], phone: null, website: null };
+  const empty = { reviews: [], phone: null, website: null, hours_status: null, photos: [] };
   if (!placeId) return empty;
 
   const cached = placeDetailsCache.get(placeId);
@@ -304,7 +360,10 @@ async function fetchPlaceDetails(placeId) {
   try {
     const response = await axios.get(
       "https://maps.googleapis.com/maps/api/place/details/json",
-      { params: { place_id: placeId, fields: "review,formatted_phone_number,website", key: GOOGLE_API_KEY } }
+      // Text Search only ever returns one representative photo per place —
+      // Place Details' own "photo" field returns up to 10, so the gallery
+      // pulls from here instead of the thin Text Search list.
+      { params: { place_id: placeId, fields: "review,formatted_phone_number,website,opening_hours,photo", key: GOOGLE_API_KEY } }
     );
     if (response.data.status !== "OK") return empty;
     const result = response.data.result || {};
@@ -312,6 +371,8 @@ async function fetchPlaceDetails(placeId) {
       reviews: (result.reviews || []).map(r => r.text).filter(Boolean),
       phone: result.formatted_phone_number || null,
       website: result.website || null,
+      hours_status: formatHoursStatus(result.opening_hours?.periods),
+      photos: (result.photos || []).slice(0, 5).map(p => p.photo_reference).filter(Boolean),
     };
     placeDetailsCache.set(placeId, { data, expiresAt: Date.now() + PLACE_DETAILS_CACHE_TTL_MS });
     return data;
@@ -534,7 +595,20 @@ async function searchRestaurants(userQuery, analysis, restaurantData, radiusKm, 
   console.log(`Fetching real reviews for ${filteredData.length} shortlisted restaurants...`);
   filteredData = await Promise.all(filteredData.map(async (r) => {
     const details = await fetchPlaceDetails(r.place_id);
-    return { ...r, customer_reviews: details.reviews, phone: details.phone, website: details.website };
+    // Prefer Place Details' fuller photo list over Text Search's single one
+    // — fall back to whatever Text Search gave if Details somehow returned
+    // none at all.
+    const photos = details.photos.length > 0 ? details.photos : r.photos;
+    // Google's photo_reference tokens aren't stable across different API
+    // calls — the SAME underlying photo gets a different reference string
+    // from Text Search vs. Place Details, so comparing the hero's Text-
+    // Search-derived reference against Place Details' list (client-side,
+    // to skip the duplicate in the gallery) silently never matched. Once
+    // Place Details' own list is available, make it the one source of
+    // truth for both the hero and the gallery so they share a reference
+    // universe and the client's dedup-by-string-match actually works.
+    const photo_reference = photos.length > 0 ? photos[0] : r.photo_reference;
+    return { ...r, customer_reviews: details.reviews, phone: details.phone, website: details.website, hours_status: details.hours_status, photos, photo_reference };
   }));
 
   const response = await client.messages.create({
@@ -610,14 +684,15 @@ Respond ONLY with a JSON array, no other text:
   const scored = JSON.parse(raw.slice(start, end + 1));
 
   // Claude's scoring response only carries name/score/summary/etc — phone,
-  // website, Google's own rating, and place_id all live on filteredData
-  // (from the Place Details enrichment above / the original Places fields)
-  // and need to be reattached so the client can render Call/Website buttons,
-  // show the real rating alongside our own match score, and (place_id) ask
-  // follow-up questions about a specific restaurant later.
+  // website, Google's own rating, place_id, hours, and the Place-Details
+  // photo list all live on filteredData (from the Place Details enrichment
+  // above / the original Places fields) and need to be reattached so the
+  // client can render Call/Website buttons, show the real rating alongside
+  // our own match score, ask follow-up questions (place_id), and show extra
+  // photos beyond the hero shot.
   return scored.map(r => {
     const match = filteredData.find(d => d.name === r.name);
-    return match ? { ...r, phone: match.phone, website: match.website, rating: match.rating, review_count: match.review_count, place_id: match.place_id } : r;
+    return match ? { ...r, phone: match.phone, website: match.website, rating: match.rating, review_count: match.review_count, place_id: match.place_id, hours_status: match.hours_status, photos: match.photos, photo_reference: match.photo_reference } : r;
   });
 }
 
@@ -729,7 +804,13 @@ app.post("/search", async (req, res) => {
         r.longitude = match.longitude;
         r.distance_km = match.distance_km;
         r.open_now = match.open_now;
-        r.photo_reference = match.photo_reference;
+        // photo_reference and photos are NOT reattached here — searchRestaurants
+        // already set both from the same Place Details call (the fuller photo
+        // set, up to 10, vs. Text Search's single one on restaurantData), so
+        // they share one reference-string universe and the client's dedup
+        // between hero and gallery actually matches. Overwriting photo_reference
+        // from restaurantData here would reintroduce a hero/gallery duplicate,
+        // since Text Search and Place Details tokens differ for the same photo.
       }
     });
 
@@ -802,6 +883,48 @@ app.get("/geocode", async (req, res) => {
   } catch (error) {
     console.error("Geocode failed:", error.message);
     res.status(502).json({ error: "Geocoding failed" });
+  }
+});
+
+// Start-screen showcase — a real nearby restaurant per category, to give a
+// sense of both "you can search for X" and "here's what you get back
+// (rating, photo)" before anyone's actually searched. Deliberately cheap:
+// no Claude call (the categories are fixed, nothing to classify) and no
+// Place Details call (name/rating/price/photo are already free in the Text
+// Search response) — just one Text Search request per category, picking
+// the highest-rated result. Not an AI-vetted "best match," just a real one.
+const SHOWCASE_CATEGORIES = [
+  { label: "Cheap eats", query: "cheap eats near me", searchTerm: "cheap restaurant" },
+  { label: "Family-friendly", query: "family-friendly restaurant nearby", searchTerm: "family friendly restaurant" },
+  { label: "Cozy cafe", query: "cozy cafe nearby", searchTerm: "cafe" },
+];
+
+app.get("/showcase", async (req, res) => {
+  const { lat, lng } = req.query;
+  if (!lat || !lng) return res.status(400).json({ error: "Missing lat/lng" });
+
+  try {
+    const items = await Promise.all(SHOWCASE_CATEGORIES.map(async (cat) => {
+      const response = await axios.get(
+        "https://maps.googleapis.com/maps/api/place/textsearch/json",
+        { params: { query: cat.searchTerm, location: `${lat},${lng}`, radius: 5000, key: GOOGLE_API_KEY } }
+      );
+      const candidates = (response.data.results || []).filter(p => p.rating);
+      if (candidates.length === 0) return null;
+      const best = candidates.sort((a, b) => b.rating - a.rating)[0];
+      return {
+        label: cat.label,
+        query: cat.query,
+        name: best.name,
+        rating: best.rating,
+        review_count: best.user_ratings_total || 0,
+        photo_reference: best.photos?.[0]?.photo_reference || null,
+      };
+    }));
+    res.json({ items: items.filter(Boolean) });
+  } catch (error) {
+    console.error("Showcase failed:", error.message);
+    res.status(502).json({ error: "Showcase failed" });
   }
 });
 
