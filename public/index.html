@@ -719,8 +719,14 @@
     }
 
     function toggleCardExpand(cardEl, index) {
-      cardEl.classList.toggle('expanded');
-      if (cardEl.classList.contains('expanded')) loadExtraPhotos(index);
+      const wasExpanded = cardEl.classList.contains('expanded');
+      // Only one card open at a time — expanding a new one collapses
+      // whatever was already open instead of letting them stack up.
+      document.querySelectorAll('.card.expanded').forEach(c => {
+        if (c !== cardEl) c.classList.remove('expanded');
+      });
+      cardEl.classList.toggle('expanded', !wasExpanded);
+      if (!wasExpanded) loadExtraPhotos(index);
     }
 
     function loadExtraPhotos(index) {
@@ -1494,7 +1500,11 @@
         return;
       }
       chip.dataset.key = data.name;
-      chip.dataset.query = data.query;
+      // The category badge sits on the photo (the thing that's actually
+      // bold/prominent now) and the restaurant is demoted to "here's a real
+      // example" text below — so tapping through to that one specific
+      // place reads as "view this pick," not a broken promise of a search.
+      chip.dataset.query = data.name;
       chip.classList.add('with-photo');
       // A 34px thumbnail can't read as an actual photo no matter how sharp
       // it is — a full-width banner is what makes "here's a real photo"
@@ -1502,11 +1512,15 @@
       const photoHtml = data.photo_reference
         ? `<img class="chip-photo" src="/photo?ref=${encodeURIComponent(data.photo_reference)}" alt="" onerror="this.remove()">`
         : "";
-      chip.innerHTML = `${photoHtml}<span class="chip-text">
-        <span class="chip-label">${data.label}</span>
-        <span class="chip-name">${data.name}</span>
-        <span class="chip-rating"><i class="ti ti-star-filled"></i> ${data.rating}</span>
-      </span>`;
+      chip.innerHTML = `
+        <div class="chip-photo-wrap">
+          ${photoHtml}
+          <span class="chip-badge">${data.label}</span>
+        </div>
+        <span class="chip-text">
+          <span class="chip-name">${data.name}</span>
+          <span class="chip-rating"><i class="ti ti-star-filled"></i> ${data.rating}</span>
+        </span>`;
     }
 
     async function loadShowcase() {
