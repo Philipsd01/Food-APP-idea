@@ -130,6 +130,9 @@
       <button class="hamburger" onclick="openMenu()">
         <i class="ti ti-menu-2"></i>
       </button>
+      <button class="hamburger" onclick="browseNearbyOnMap()" title="Browse nearby on the map">
+        <i class="ti ti-map-2"></i>
+      </button>
     </div>
 
     <p class="header-label">discover</p>
@@ -215,6 +218,10 @@
     let currentResults = [];
     let isLoading = false;
     let lastQuery = "";
+    // True while showing plain nearby results from browseNearbyOnMap()
+    // instead of a real scored search — those results have no score/tags/
+    // summary, so map popups and the list toggle adapt accordingly.
+    let browseMode = false;
 
     // Search is actually 4-5 sequential backend steps (classify → find
     // places → filter by price → read reviews → rank), but there's no
@@ -475,6 +482,10 @@
     }
 
     function makePopupHtml(r, index) {
+      // browseMode results (see browseNearbyOnMap) are plain nearby listings
+      // with no score/tags/summary — the dot, summary block, and "View in
+      // list" link only make sense for an actual scored search.
+      const hasScore = typeof r.score === "number";
       const scoreClass = r.score >= 80 ? 'high' : r.score >= 50 ? 'medium' : 'low';
       const hasPrice = r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown';
       const ratingLabel = r.rating ? `<span class="no-wrap">★ ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>` : null;
@@ -483,13 +494,12 @@
         <div class="map-popup">
           <div class="map-popup-header">
             <span class="map-popup-name">${r.name}</span>
-            <span class="map-popup-dot ${scoreClass}"></span>
+            ${hasScore ? `<span class="map-popup-dot ${scoreClass}"></span>` : ''}
           </div>
           <div class="map-popup-meta">${meta}</div>
-          <div class="map-popup-divider"></div>
-          <div class="map-popup-summary">${r.summary}</div>
+          ${r.summary ? `<div class="map-popup-divider"></div><div class="map-popup-summary">${r.summary}</div>` : ''}
           <div class="map-popup-footer">
-            <button class="map-popup-list-btn" onclick="focusOnList(${index})">View in list</button>
+            ${!browseMode ? `<button class="map-popup-list-btn" onclick="focusOnList(${index})">View in list</button>` : ''}
             ${(r.latitude && r.longitude) ? `
             <div class="map-popup-route-btns">
               <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'driving')" title="Route by car"><i class="ti ti-car"></i></button>
@@ -898,6 +908,10 @@
       if (!directAnalysis && !query) return;
 
       stopSuggestionChips();
+      // A real search always replaces plain map-browsing — restore the List
+      // option that browseNearbyOnMap() hides (there's a scored list again).
+      browseMode = false;
+      document.getElementById('btnList').style.display = '';
 
       // Only the immediately preceding message is needed here — analyzeQuery
       // uses it purely to detect refine/pivot/new signals ("but", "actually",
@@ -1039,12 +1053,18 @@
     function resetSearch() {
       currentAnalysis = null;
       lastQuery = "";
+      browseMode = false;
+      document.getElementById('btnList').style.display = '';
       searchInput.placeholder = "Describe what you're looking for...";
       analysisBox.style.display = "none";
       resultsBox.innerHTML = "";
+      resultsBox.style.display = 'flex';
+      // switchView('map') leaves #mapView's own display:block set directly —
+      // hiding the toggle bar alone doesn't hide the map itself, so it was
+      // staying visible underneath the start screen after a reset.
+      document.getElementById('mapView').style.display = 'none';
       document.getElementById('viewToggle').style.display = 'none';
       error.style.display = "none";
-      document.getElementById('viewToggle').style.display = 'none';
       searchInput.focus();
       startSuggestionChips();
     }
@@ -1218,6 +1238,53 @@
       }
 
       document.getElementById('viewToggle').style.display = 'flex';
+    }
+
+    // Entry point for someone who'd rather just look at what's around than
+    // describe what they want — jumps straight to the map with plain nearby
+    // restaurants (see /nearby: one cheap Text Search call, no Claude, no
+    // per-place Details), skipping the search box entirely. Typing a real
+    // query afterwards still works as normal — search() clears browseMode
+    // and takes back over.
+    async function browseNearbyOnMap() {
+      // Acts as a toggle — tapping it again while already browsing goes
+      // back to the start screen instead of just re-fetching the same spot.
+      if (browseMode) {
+        resetSearch();
+        return;
+      }
+      const got = await ensureLocation();
+      if (!got || userLatitude == null || userLongitude == null) {
+        error.textContent = "Couldn't get your location — set one manually from the menu to browse the map.";
+        error.style.display = "block";
+        return;
+      }
+      error.style.display = "none";
+      stopSuggestionChips();
+      resultsBox.innerHTML = "";
+      analysisBox.style.display = "none";
+      searchInput.value = "";
+      lastQuery = "";
+      currentAnalysis = null;
+      currentResults = [];
+      browseMode = true;
+      markers.forEach(m => m.remove());
+      markers = [];
+      clearRoute();
+
+      // No scored list exists in browse mode — only Map is a real option.
+      document.getElementById('btnList').style.display = 'none';
+      document.getElementById('viewToggle').style.display = 'flex';
+      switchView('map');
+
+      try {
+        const res = await fetch(`/nearby?lat=${userLatitude}&lng=${userLongitude}`);
+        const data = await res.json();
+        currentResults = data.results || [];
+      } catch (e) {
+        currentResults = [];
+      }
+      initMap(currentResults);
     }
 
     function isDarkMode() {

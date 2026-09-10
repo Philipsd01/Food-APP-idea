@@ -351,6 +351,11 @@ body.dark .view-toggle {
     height: 210px;
     margin-bottom: 8px;
     perspective: 900px;
+    /* Side cards are positioned wide enough (see applyWheelTransforms) to
+       extend past this container's own edges — without clipping them here,
+       they widen the whole page and make it horizontally scrollable rather
+       than just fading out of view. */
+    overflow: hidden;
     /* Fades the side cards toward the background near the container edges
        instead of letting them stop abruptly — reads as depth, not a crop. */
     -webkit-mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
@@ -1066,7 +1071,10 @@ body.dark .view-toggle {
     opacity: 0;
     visibility: hidden;
     transition: opacity 0.3s, visibility 0.3s;
-    z-index: 998;
+    /* Leaflet's own zoom control/attribution default to z-index:1000, which
+       used to poke through above this overlay (998) whenever the menu was
+       opened over the map view. */
+    z-index: 1500;
 }
 
 .menu-overlay.open {
@@ -1082,7 +1090,7 @@ body.dark .view-toggle {
     height: 100%;
     background: var(--paper);
     border-right: 0.5px solid var(--border);
-    z-index: 999;
+    z-index: 1501;
     transition: left 0.3s ease;
     overflow-y: auto;
     display: flex;

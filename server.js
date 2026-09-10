@@ -928,6 +928,40 @@ app.get("/showcase", async (req, res) => {
   }
 });
 
+// Powers "browse the map" — a plain, un-scored list of what's actually
+// nearby for someone who wants to look around rather than describe what
+// they want. Same cost-conscious shape as /showcase: one Text Search call,
+// no Claude, no per-place Details — just what Google already gives back.
+app.get("/nearby", async (req, res) => {
+  const { lat, lng } = req.query;
+  if (!lat || !lng) return res.status(400).json({ error: "Missing lat/lng" });
+
+  try {
+    const response = await axios.get(
+      "https://maps.googleapis.com/maps/api/place/textsearch/json",
+      { params: { query: "restaurant", location: `${lat},${lng}`, radius: 2000, type: "restaurant", key: GOOGLE_API_KEY } }
+    );
+    const results = (response.data.results || [])
+      .filter(p => p.geometry?.location)
+      .map(p => ({
+        name: p.name,
+        rating: p.rating || null,
+        review_count: p.user_ratings_total || 0,
+        photo_reference: p.photos?.[0]?.photo_reference || null,
+        place_id: p.place_id,
+        latitude: p.geometry.location.lat,
+        longitude: p.geometry.location.lng,
+        distance_km: getDistanceKm(Number(lat), Number(lng), p.geometry.location.lat, p.geometry.location.lng),
+      }))
+      .sort((a, b) => a.distance_km - b.distance_km)
+      .slice(0, 20);
+    res.json({ results });
+  } catch (error) {
+    console.error("Nearby failed:", error.message);
+    res.status(502).json({ error: "Nearby search failed" });
+  }
+});
+
 // Proxies Google's Place Photo endpoint so the browser never sees our
 // Google API key — the key has to go in that URL's querystring, so calling
 // it directly from the client would leak it, breaking the pattern every
