@@ -330,6 +330,18 @@ body.dark .view-toggle {
     margin-bottom: 6px;
 }
 
+/* Small fade + rise on each headline swap (see updateHeadline in
+   index.html) — deliberately lighter than the carousel's 3D motion so it
+   reads as a text update, not a second thing competing for attention. */
+@keyframes headlineSwap {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+#chipsHeadline.headline-swap {
+    animation: headlineSwap 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
 /* A 3D carousel of real cards (see applyWheelTransforms in index.html): 3
    cards positioned in 3D space on a circle via perspective + translate3d,
    one step of the wheel every ~3.8s. Sized to actually use the space below
@@ -453,17 +465,22 @@ body.dark .view-toggle {
 }
 
 /* The card currently in focus gets real visual weight — an ember-tinted
-   frame and a soft glow — instead of just being the biggest blob among
-   three identical outlines. */
+   frame — instead of just being the biggest blob among three identical
+   outlines. (Used to also carry a soft ember glow here, but its downward
+   offset showed as a stray reddish tint under the card, so just the
+   border remains.) */
 .suggestion-chip.front {
     border-color: var(--ember);
-    box-shadow: 0 12px 32px -8px color-mix(in srgb, var(--ember) 45%, transparent);
 }
 
 /* Saved restaurants surfaced on the start screen (see renderFrontSaved in
    index.html) — a reason to open the app even without a new craving. */
 .front-saved {
-    margin-top: 24px;
+    margin-top: 40px;
+}
+
+.front-saved .chips-label {
+    margin-bottom: 14px;
 }
 
 .saved-row {
@@ -471,6 +488,12 @@ body.dark .view-toggle {
     gap: 8px;
     overflow-x: auto;
     padding-bottom: 2px;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* old Edge/IE */
+}
+
+.saved-row::-webkit-scrollbar {
+    display: none; /* Chrome/Safari — scrolling still works, just no visible track */
 }
 
 /* Same quality bar as the carousel (real photo, rounded card, subtle
@@ -521,6 +544,7 @@ body.dark .view-toggle {
     background: rgba(0, 0, 0, 0.4);
     color: #fff;
     font-size: 9px;
+    cursor: pointer;
 }
 
 .saved-chip-name {
@@ -1144,6 +1168,13 @@ body.dark .view-toggle {
 
 .menu-section.open .menu-section-items {
     max-height: 300px;
+    overflow-y: auto;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* old Edge/IE */
+}
+
+.menu-section.open .menu-section-items::-webkit-scrollbar {
+    display: none; /* Chrome/Safari — scrolling still works, just no visible track */
 }
 
 .menu-section-items .menu-item {
@@ -1156,7 +1187,8 @@ body.dark .view-toggle {
     white-space: nowrap;
 }
 
-.saved-restaurant-item {
+.saved-restaurant-item,
+.history-item {
     justify-content: space-between;
     padding-right: 16px;
 }
@@ -1169,14 +1201,16 @@ body.dark .view-toggle {
     white-space: nowrap;
 }
 
-.saved-restaurant-item i {
+.saved-restaurant-item i,
+.history-item i {
     flex-shrink: 0;
     color: var(--ink-3);
     cursor: pointer;
     padding: 4px;
 }
 
-.saved-restaurant-item i:hover {
+.saved-restaurant-item i:hover,
+.history-item i:hover {
     color: var(--ember);
 }
 

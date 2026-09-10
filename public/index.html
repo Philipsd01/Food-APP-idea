@@ -146,7 +146,7 @@
     </div>
 
     <div class="start-screen-extra" id="startScreenExtra" style="display: none;">
-      <p class="chips-label">Try asking</p>
+      <p class="chips-label" id="chipsHeadline">Try asking</p>
       <div class="suggestion-chips" id="suggestionChips">
         <button class="suggestion-chip" onclick="runSuggestion(this)"></button>
         <button class="suggestion-chip" onclick="runSuggestion(this)"></button>
@@ -1101,10 +1101,11 @@
         return;
       }
       container.innerHTML = history.map((h, i) =>
-        `<div class="menu-item" onclick="rerunHistoryEntry(${i})">
+        `<div class="menu-item history-item" onclick="rerunHistoryEntry(${i})">
           <span>${h.label}</span>
+          <i class="ti ti-x" onclick="event.stopPropagation(); deleteHistoryEntry(${i})"></i>
         </div>`
-      ).join("") + `<div class="menu-item" onclick="clearSearchHistory()"><span style="color: var(--ember);">Clear history</span></div>`;
+      ).join("");
     }
 
     function rerunHistoryEntry(index) {
@@ -1116,8 +1117,10 @@
       search(entry.analysis);
     }
 
-    function clearSearchHistory() {
-      localStorage.removeItem(SEARCH_HISTORY_KEY);
+    function deleteHistoryEntry(index) {
+      const history = loadSearchHistory();
+      history.splice(index, 1);
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history));
       renderSearchHistory();
     }
 
@@ -1160,7 +1163,12 @@
       const saved = loadSavedRestaurants().filter(s => s.name !== name);
       localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(saved));
       renderSavedRestaurantsMenu();
-      renderResults(currentResults); // keep any visible save buttons in sync
+      renderFrontSaved(); // keep the start-screen row in sync
+      // Only re-render the results list/map if a search has actually run —
+      // currentResults defaults to [] on the start screen, and re-rendering
+      // with an empty array was incorrectly showing the "nothing fits" empty
+      // state there even though no search had happened.
+      if (currentResults.length > 0) renderResults(currentResults);
     }
 
     function renderSavedRestaurantsMenu() {
@@ -1495,11 +1503,13 @@
       if (typeof data === "string") {
         chip.dataset.key = data;
         chip.dataset.query = data;
+        delete chip.dataset.label;
         chip.classList.remove('with-photo');
         chip.innerHTML = `<span class="chip-text-only">${data}</span>`;
         return;
       }
       chip.dataset.key = data.name;
+      chip.dataset.label = data.label;
       // The category badge sits on the photo (the thing that's actually
       // bold/prominent now) and the restaurant is demoted to "here's a real
       // example" text below — so tapping through to that one specific
@@ -1547,6 +1557,7 @@
               used.push(typeof item === "string" ? item : item.name);
               renderChip(chip, item);
             });
+            updateHeadline();
           }
         }
       } catch (e) {
@@ -1577,7 +1588,12 @@
         const angle = (wheelAngle + i * 120) % 360;
         const rad = angle * Math.PI / 180;
         const z = Math.cos(rad) * 90;
-        const x = Math.sin(rad) * 170;
+        // 195 rather than 170 — at the resting 120°-apart angles, 170 let
+        // the side card's edge overlap the front card's by ~10px, which
+        // showed as a stray sliver of the side photo peeking out from
+        // behind the front card's white text footer. This spacing clears
+        // it with a small gap instead.
+        const x = Math.sin(rad) * 195;
         const depth = (z + 90) / 180; // 0 = fully back, 1 = fully front
         chip.style.transform = `translate(-50%, -50%) translate3d(${x.toFixed(1)}px, 0, ${z.toFixed(1)}px) scale(${(0.55 + 0.45 * depth).toFixed(2)})`;
         chip.style.opacity = (0.35 + 0.65 * depth).toFixed(2);
@@ -1599,6 +1615,71 @@
 
       wheelAngle = (wheelAngle + 120) % 360;
       applyWheelTransforms();
+      updateHeadline();
+    }
+
+    // Day-part-aware headline above the chips — swaps the flat "Try asking"
+    // label for something that reads like the app is actually talking to
+    // you. Pure client-side Date().getHours(), no location/API involved, so
+    // it's as cheap as the label it replaces. When the user has saved spots,
+    // a couple of lines nudging toward those are mixed into the same pool
+    // rather than shown as a separate always-on line.
+    const HEADLINE_POOL = {
+      morning: ["Ready for breakfast?", "What sounds good this morning?", "Coffee run?"],
+      lunch: ["What's for lunch?", "Looking for a lunch spot?", "Hungry yet?"],
+      afternoon: ["Craving a snack?", "Coffee break?", "What sounds good right now?"],
+      evening: ["What's for dinner?", "Looking for somewhere to eat tonight?", "Planning dinner?"],
+      late: ["Late-night bite?", "Still hungry?", "Something open right now?"],
+    };
+
+    // When the front-facing chip is a real showcase pick, the headline talks
+    // about THAT one instead of the generic day-part line — keyed off the
+    // same label already shown as the badge on the photo, so there's no
+    // second source of truth to keep in sync.
+    const CATEGORY_HEADLINES = {
+      "Cheap eats": ["Watching your wallet?", "Looking for something cheap?"],
+      "Family-friendly": ["Family outing?", "Looking for somewhere for the whole crew?"],
+      "Cozy cafe": ["Coffee break?", "Fancy a cozy cafe?"],
+    };
+
+    function dayPartHeadline() {
+      const hour = new Date().getHours();
+      let part;
+      if (hour >= 5 && hour < 11) part = "morning";
+      else if (hour >= 11 && hour < 14) part = "lunch";
+      else if (hour >= 14 && hour < 17) part = "afternoon";
+      else if (hour >= 17 && hour < 22) part = "evening";
+      else part = "late";
+
+      const pool = [...HEADLINE_POOL[part]];
+      if (loadSavedRestaurants().length > 0) {
+        pool.push("Craving one of your favorites?", "Try one of your saved spots?");
+      }
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    // Reads whichever chip is currently front-and-center and picks a
+    // headline to match — category line when it's a showcase pick, the
+    // day-part fallback otherwise (plain-text chips, or a category we don't
+    // have a line for).
+    function updateHeadline() {
+      const headline = document.getElementById('chipsHeadline');
+      if (!headline) return;
+      const chips = document.querySelectorAll('.suggestion-chip');
+      const front = chips[frontChipIndex()];
+      const label = front ? front.dataset.label : null;
+      const pool = label && CATEGORY_HEADLINES[label];
+      const next = pool
+        ? pool[Math.floor(Math.random() * pool.length)]
+        : dayPartHeadline();
+      if (next === headline.textContent) return;
+      headline.textContent = next;
+      // Restart the CSS animation even if it's still mid-play from the
+      // previous swap (chips rotate every 3.8s, well past the 420ms
+      // animation, but this keeps it correct even if that ever changes).
+      headline.classList.remove('headline-swap');
+      void headline.offsetWidth;
+      headline.classList.add('headline-swap');
     }
 
     function startSuggestionChips() {
@@ -1622,6 +1703,7 @@
         renderChip(chip, data);
       });
       applyWheelTransforms();
+      updateHeadline();
       wheelInterval = setInterval(stepWheel, 3800);
       loadShowcase();
     }
@@ -1665,10 +1747,11 @@
             const photoHtml = r.photo_reference
               ? `<img class="saved-chip-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()">`
               : "";
+            const escapedName = r.name.replace(/'/g, "\\'");
             return `<div class="saved-chip" ${clickAttr}>
               <div class="saved-chip-photo-wrap">
                 ${photoHtml}
-                <i class="ti ti-heart-filled saved-chip-heart"></i>
+                <i class="ti ti-heart-filled saved-chip-heart" onclick="event.stopPropagation(); unsaveRestaurant('${escapedName}')"></i>
               </div>
               <span class="saved-chip-name">${r.name}</span>
             </div>`;
