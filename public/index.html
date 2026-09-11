@@ -483,13 +483,33 @@
 
     function makePopupHtml(r, index) {
       // browseMode results (see browseNearbyOnMap) are plain nearby listings
-      // with no score/tags/summary — the dot, summary block, and "View in
-      // list" link only make sense for an actual scored search.
+      // with no score/tags/summary — the dot and "View in list" link only
+      // make sense for an actual scored search. Hours/phone/website/a real
+      // review quote fill the same slot once loadBrowseMarkerDetails' lazy
+      // /place-details fetch resolves for this one marker (not fetched for
+      // all nearby results upfront — only the one someone actually taps).
       const hasScore = typeof r.score === "number";
       const scoreClass = r.score >= 80 ? 'high' : r.score >= 50 ? 'medium' : 'low';
       const hasPrice = r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown';
       const ratingLabel = r.rating ? `<span class="no-wrap">★ ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>` : null;
       const meta = [r.tags?.cuisine, formatDistance(r.distance_km), ratingLabel, hasPrice ? r.tags.price : null].filter(Boolean).join(' · ');
+      const description = r.summary || (r.review_quote ? `“${r.review_quote}”` : null);
+      // hours_status text itself already says "Closes ..." vs "Opens ..." —
+      // reading that prefix instead of a separate open_now flag means this
+      // works whether r came from a real search (which sets open_now) or a
+      // browse-mode /place-details fetch (which doesn't).
+      const hoursLine = r.hours_status
+        ? `<div class="map-popup-hours ${r.hours_status.startsWith('Closes') ? 'open-now' : 'closed-now'}">${r.hours_status}</div>`
+        : (browseMode && !r._detailsLoaded ? `<div class="map-popup-hours"><div class="map-popup-skeleton-line"></div></div>` : '');
+      // The description arrives after hours/phone/website (see
+      // loadBrowseMarkerDetails) — its own loading skeleton so the popup
+      // doesn't just sit there looking finished-but-empty while the LLM
+      // call is still in flight.
+      const descriptionBlock = description
+        ? `<div class="map-popup-divider"></div><div class="map-popup-summary">${description}</div>`
+        : (browseMode && r._descriptionLoading
+            ? `<div class="map-popup-divider"></div><div class="map-popup-summary"><div class="map-popup-skeleton-line" style="width:100%"></div><div class="map-popup-skeleton-line"></div></div>`
+            : '');
       return `
         <div class="map-popup">
           <div class="map-popup-header">
@@ -497,18 +517,76 @@
             ${hasScore ? `<span class="map-popup-dot ${scoreClass}"></span>` : ''}
           </div>
           <div class="map-popup-meta">${meta}</div>
-          ${r.summary ? `<div class="map-popup-divider"></div><div class="map-popup-summary">${r.summary}</div>` : ''}
+          ${hoursLine}
+          ${descriptionBlock}
           <div class="map-popup-footer">
             ${!browseMode ? `<button class="map-popup-list-btn" onclick="focusOnList(${index})">View in list</button>` : ''}
-            ${(r.latitude && r.longitude) ? `
             <div class="map-popup-route-btns">
+              ${r.phone ? `<a class="map-popup-route-btn" href="tel:${r.phone}" title="Call"><i class="ti ti-phone"></i></a>` : ''}
+              ${r.website ? `<a class="map-popup-route-btn" href="${r.website}" target="_blank" rel="noopener" title="Website"><i class="ti ti-world"></i></a>` : ''}
+              ${(r.latitude && r.longitude) ? `
               <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'driving')" title="Route by car"><i class="ti ti-car"></i></button>
               <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'cycling')" title="Route by bike"><i class="ti ti-bike"></i></button>
               <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'walking')" title="Route by foot"><i class="ti ti-walk"></i></button>
-              <button class="map-popup-route-btn" onclick="clearRoute()" title="Clear route"><i class="ti ti-x"></i></button>
-            </div>` : ''}
+              <button class="map-popup-route-btn" onclick="clearRoute()" title="Clear route"><i class="ti ti-x"></i></button>` : ''}
+            </div>
           </div>
         </div>`;
+    }
+
+    // A raw Google review can run to several paragraphs — Claude's own
+    // summary field is always a tight sentence or two, so a review quote
+    // standing in for it needs the same treatment, not the full text.
+    function truncateReview(text, maxLen = 130) {
+      if (!text) return null;
+      if (text.length <= maxLen) return text;
+      const cut = text.slice(0, maxLen);
+      const lastSpace = cut.lastIndexOf(' ');
+      return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + '…';
+    }
+
+    // Fires once, the first time a browse-mode marker's popup is opened.
+    // Two separate requests, not one — hours/phone/website (a single fast
+    // Google round trip) update the popup as soon as they're back, and the
+    // AI-written description (see describeRestaurant in server.js), which is
+    // the slower part, arrives and updates the popup again on its own once
+    // it's ready. Blocking both on the LLM call made the whole popup feel
+    // stuck for a couple of seconds with no sign anything was happening.
+    async function loadBrowseMarkerDetails(index, marker) {
+      const r = currentResults[index];
+      if (!r || !r.place_id || r._detailsLoaded) return;
+      r._detailsLoaded = true; // set before the await — a second tap while this is in flight shouldn't refetch
+
+      let reviews = [];
+      try {
+        const res = await fetch(`/place-details?place_id=${encodeURIComponent(r.place_id)}`);
+        const details = await res.json();
+        r.hours_status = details.hours_status;
+        r.phone = details.phone;
+        r.website = details.website;
+        reviews = details.reviews || [];
+      } catch (e) {
+        // Leave r as-is — popup just keeps showing what it already had.
+      }
+      r._descriptionLoading = true;
+      if (marker.isPopupOpen()) marker.setPopupContent(makePopupHtml(r, index));
+
+      try {
+        const res = await fetch("/describe-restaurant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: r.name, rating: r.rating, review_count: r.review_count, reviews }),
+        });
+        const data = await res.json();
+        // Falls back to a real review quote only if the description call
+        // itself failed — never a fabricated one.
+        r.summary = data.description || null;
+        r.review_quote = r.summary ? null : truncateReview(reviews[0] || null);
+      } catch (e) {
+        r.review_quote = truncateReview(reviews[0] || null);
+      }
+      r._descriptionLoading = false;
+      if (marker.isPopupOpen()) marker.setPopupContent(makePopupHtml(r, index));
     }
 
     const TAG_FIELDS = [
@@ -903,6 +981,29 @@
       document.getElementById("maxResultsLabel").textContent = maxResults;
     }
 
+    // Shared between search() (map tab already active when a search starts)
+    // and switchView() (someone switches to the map tab mid-search) — both
+    // need to be able to put this spinner up, not just whichever one used to
+    // build it inline.
+    function showMapLoadingSpinner() {
+      // Leaflet marks its container element internally when a map is created there.
+      // Wiping the container's HTML without calling map.remove() first leaves that
+      // marker in place, so the next L.map() call on it throws "already initialized".
+      if (map) { map.remove(); }
+      document.getElementById('mapView').innerHTML = `
+        <div style="height:100%;display:flex;align-items:center;justify-content:center;background:var(--paper-2);border-radius:12px;">
+          <div style="text-align:center;color:var(--ink-3);">
+            <div class="map-spinner"></div>
+            <p class="loading-status" style="margin-top:12px;margin-bottom:0;"></p>
+          </div>
+        </div>`;
+      map = null;
+      tileLayer = null;
+      markers = [];
+      routeLine = null;
+      routeTargetIndex = null;
+    }
+
     async function search(directAnalysis) {
       const query = directAnalysis ? "" : searchInput.value.trim();
       if (!directAnalysis && !query) return;
@@ -940,24 +1041,7 @@
       isLoading = true;
       loading.style.display = activeView === 'list' ? "block" : "none";
 
-      if (activeView === 'map') {
-        // Leaflet marks its container element internally when a map is created there.
-        // Wiping the container's HTML without calling map.remove() first leaves that
-        // marker in place, so the next L.map() call on it throws "already initialized".
-        if (map) { map.remove(); }
-        document.getElementById('mapView').innerHTML = `
-          <div style="height:100%;display:flex;align-items:center;justify-content:center;background:var(--paper-2);border-radius:12px;">
-            <div style="text-align:center;color:var(--ink-3);">
-              <div class="map-spinner"></div>
-              <p class="loading-status" style="margin-top:12px;margin-bottom:0;"></p>
-            </div>
-          </div>`;
-        map = null;
-        tileLayer = null;
-        markers = [];
-        routeLine = null;
-        routeTargetIndex = null;
-      }
+      if (activeView === 'map') showMapLoadingSpinner();
 
       // Both possible loading UIs (list skeleton, map spinner) are in the
       // DOM by now, whichever one is actually visible — start the shared
@@ -1002,6 +1086,11 @@
           <div class="analysis-interpretation">${a.interpretation}</div>
           <div class="analysis-tags">${tagsHtml}</div>`;
         analysisBox.style.display = "block";
+        // Results land here without going through switchView() — the active
+        // tab isn't changing, but the single toggle button still needs to
+        // reflect it (this doesn't run through switchView, which is the
+        // usual place that call happens).
+        updateViewToggleButtons();
         document.getElementById('viewToggle').style.display = 'flex';
         error.style.display = "none";
 
@@ -1210,6 +1299,28 @@
       }).join("");
     }
 
+    // A two-tab bar made it look like "List" and "Map" were both places you
+    // could be, when really only one is ever showing — this collapses it to
+    // a single button that always names the OTHER view (tap "Map" while on
+    // List, the button becomes "List"). browseMode has no list at all, so it
+    // always shows just "Map" regardless of the active/inactive read below.
+    // Called both from switchView() (an explicit tab switch) and from
+    // wherever a search's results land without going through switchView (the
+    // active tab doesn't change then, but the buttons still need to reflect
+    // whichever state search() left browseMode in before results arrived).
+    function updateViewToggleButtons() {
+      const btnList = document.getElementById('btnList');
+      const btnMap = document.getElementById('btnMap');
+      if (browseMode) {
+        btnList.style.display = 'none';
+        btnMap.style.display = '';
+        return;
+      }
+      const mapActive = btnMap.classList.contains('active');
+      btnList.style.display = mapActive ? '' : 'none';
+      btnMap.style.display = mapActive ? 'none' : '';
+    }
+
     function switchView(view) {
       const listEl = document.getElementById('results');
       const mapEl = document.getElementById('mapView');
@@ -1231,12 +1342,22 @@
         // of always jumping it to the top of the screen — switching tabs
         // shouldn't feel like the page yanked control away from you.
         document.getElementById('viewToggle').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        setTimeout(() => {
-          map && map.invalidateSize();
-          if (markers.length === 0) initMap(currentResults);
-        }, 100);
+        if (isLoading) {
+          // A search can still be in flight when someone switches to Map —
+          // show its own spinner here instead of leaving the list's skeleton
+          // visible underneath (that skeleton only turns off once the search
+          // resolves, it doesn't know the active tab just changed).
+          loading.style.display = "none";
+          showMapLoadingSpinner();
+        } else {
+          setTimeout(() => {
+            map && map.invalidateSize();
+            if (markers.length === 0) initMap(currentResults);
+          }, 100);
+        }
       }
 
+      updateViewToggleButtons();
       document.getElementById('viewToggle').style.display = 'flex';
     }
 
@@ -1251,6 +1372,17 @@
       // back to the start screen instead of just re-fetching the same spot.
       if (browseMode) {
         resetSearch();
+        return;
+      }
+      // A real search that's loading, or already showing results, owns this
+      // button while it's active — it should just flip between that
+      // search's own List/Map tabs (exactly like the tabs themselves do),
+      // not launch a separate "what's nearby" browse that silently replaces
+      // the search. viewToggle's own display state already tracks this: it's
+      // hidden only when there's truly no search in progress or on screen.
+      if (isLoading || document.getElementById('viewToggle').style.display !== 'none') {
+        const isMapActive = document.getElementById('btnMap').classList.contains('active');
+        switchView(isMapActive ? 'list' : 'map');
         return;
       }
       const got = await ensureLocation();
@@ -1330,6 +1462,31 @@
       });
     }
 
+    // Plain, un-numbered pin for browseNearbyOnMap()'s results — those
+    // aren't ranked (no score, just distance), so a number would imply an
+    // ordering that isn't real.
+    function makePlainPin() {
+      const isDark = isDarkMode();
+      const bg = isDark ? '#211C17' : '#FFFFFF';
+      const border = isDark ? '#E07A3E' : '#8B3A1F';
+
+      return L.divIcon({
+        className: '',
+        html: `
+          <div style="
+            width: 14px;
+            height: 14px;
+            background: ${bg};
+            border-radius: 50%;
+            border: 1.5px solid ${border};
+            box-shadow: 0 1px 6px rgba(0,0,0,${isDark ? '0.5' : '0.15'});
+          "></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+        popupAnchor: [0, -10]
+      });
+    }
+
     function initMap(results) {
       const mapEl = document.getElementById('mapView');
 
@@ -1364,7 +1521,7 @@
       results.forEach((r, index) => {
         if (!r.latitude || !r.longitude) return;
         const marker = L.marker([r.latitude, r.longitude], {
-          icon: makeNumberedPin(index + 1)
+          icon: browseMode ? makePlainPin() : makeNumberedPin(index + 1)
         })
           .addTo(map)
           .bindTooltip(r.name, { permanent: true, direction: 'top', offset: [0, -16], className: 'marker-label', interactive: false })
@@ -1373,7 +1530,10 @@
           // earlier click is still on the map leaves a stray distance/time
           // label with nothing on screen to tie it to — so switching to
           // another restaurant drops whatever route doesn't belong to it.
-          .on('popupopen', () => { if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute(); });
+          .on('popupopen', () => {
+            if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute();
+            if (browseMode) loadBrowseMarkerDetails(index, marker);
+          });
         // Indexed, not pushed — a restaurant with no coordinates gets skipped
         // above without advancing this array, so push() would silently drift
         // every later marker's position out of sync with currentResults[index]
@@ -1509,12 +1669,15 @@
         currentResults.forEach((r, index) => {
           if (!r.latitude || !r.longitude) return;
           const marker = L.marker([r.latitude, r.longitude], {
-            icon: makeNumberedPin(index + 1)
+            icon: browseMode ? makePlainPin() : makeNumberedPin(index + 1)
           })
             .addTo(map)
             .bindTooltip(r.name, { permanent: true, direction: 'top', offset: [0, -16], className: 'marker-label', interactive: false })
             .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' })
-            .on('popupopen', () => { if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute(); });
+            .on('popupopen', () => {
+              if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute();
+              if (browseMode) loadBrowseMarkerDetails(index, marker);
+            });
           markers[index] = marker;
         });
       }

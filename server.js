@@ -728,6 +728,38 @@ Answer in 1-3 short, direct, conversational sentences.`,
   return extractText(response, "askAboutRestaurant").trim();
 }
 
+// Gives a browse-mode marker the same kind of description a real search's
+// "summary" field carries — same model, same grounded-only-in-real-data
+// rule, same 1-2 sentence length — but written as a general description of
+// the place rather than "why this matched", since there's no query behind
+// a plain nearby-browse tap. Only called per marker someone actually taps
+// (see /place-details), never for a whole nearby list at once.
+async function describeRestaurant(name, reviews, rating, reviewCount) {
+  const reviewText = reviews && reviews.length > 0
+    ? reviews.slice(0, 5).map(r => `"${r}"`).join("\n")
+    : "No customer reviews available.";
+
+  const response = await client.messages.create({
+    model: "claude-haiku-4-5",
+    max_tokens: 60, // hard ceiling on top of the prompt's own length rule — a
+                     // 150-token budget let earlier attempts run to 5+ sentences
+                     // despite being told "1-2"; this makes long output impossible.
+    messages: [{
+      role: "user",
+      content: `Write a ONE-sentence, appealing description of this restaurant, in the same style as a short curated recommendation blurb — like "Highest-rated French option with an outstanding 4.8 rating, praised for authentic, fresh food and a cozy, welcoming atmosphere." Maximum 25 words. Ground it only in the rating and reviews given below — never invent cuisine, dishes, or atmosphere details that aren't supported by them.
+
+Restaurant: ${name}
+Google rating: ${rating ?? "unknown"} (${reviewCount ?? 0} reviews)
+Customer reviews:
+${reviewText}
+
+Respond with ONLY that one sentence — no preamble, no quotation marks around it.`,
+    }],
+  });
+
+  return extractText(response, "describeRestaurant").trim();
+}
+
 app.post("/ask-restaurant", async (req, res) => {
   const { placeId, name, question, tags, summary } = req.body;
   if (!placeId || !name || !question) {
@@ -960,6 +992,36 @@ app.get("/nearby", async (req, res) => {
     console.error("Nearby failed:", error.message);
     res.status(502).json({ error: "Nearby search failed" });
   }
+});
+
+// Lets a browse-mode marker fetch the same hours/phone/website a real
+// search's Place Details enrichment already gets — lazily, one call per
+// marker someone actually taps, not upfront for every nearby result. Split
+// out from the description call (below) so the popup can show hours/phone/
+// website as soon as this — the fast one, a single Google round trip —
+// resolves, instead of both waiting on the slower LLM call together.
+app.get("/place-details", async (req, res) => {
+  const { place_id } = req.query;
+  if (!place_id) return res.status(400).json({ error: "Missing place_id" });
+  const details = await fetchPlaceDetails(place_id);
+  res.json(details);
+});
+
+// The slower half of a browse-mode marker tap — takes the reviews the
+// client already fetched via /place-details (no need to hit Google again)
+// and writes the one-sentence description. Kept as its own request so the
+// client can show hours/phone/website immediately and let this arrive
+// separately, rather than blocking everything on an LLM call.
+app.post("/describe-restaurant", async (req, res) => {
+  const { name, rating, review_count, reviews } = req.body;
+  if (!name) return res.status(400).json({ error: "Missing name" });
+  let description = null;
+  try {
+    description = await describeRestaurant(name, reviews || [], rating ?? null, review_count ?? null);
+  } catch (error) {
+    console.error("describeRestaurant failed:", error.message);
+  }
+  res.json({ description });
 });
 
 // Proxies Google's Place Photo endpoint so the browser never sees our

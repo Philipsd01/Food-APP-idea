@@ -90,12 +90,14 @@ body.dark .top-bar {
 
 .view-toggle {
     display: flex;
+    justify-content: center;
     gap: 0;
     margin-bottom: 14px;
     margin-left: -20px;
     margin-right: -20px;
     padding-left: 20px;
     padding-right: 20px;
+    padding-bottom: 10px;
     border-bottom: 0.5px solid var(--border);
     position: sticky;
     top: 58px;
@@ -640,13 +642,18 @@ body.dark .view-toggle {
 }
 
 
+/* Only one of these two is ever visible at a time (see
+   updateViewToggleButtons in index.html) — it always names the OTHER view,
+   so it reads as "switch to Map" rather than a "you are here" tab. A small
+   standalone pill fits that better than the old two-column tab-strip look,
+   which only made sense when both buttons shared one row. */
 .toggle-view-btn {
-    flex: 1;
-    padding: 9px 8px 8px;
-    border: none;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    color: var(--ink-3);
+    flex: none;
+    padding: 7px 16px;
+    border: 0.5px solid var(--border);
+    border-radius: 20px;
+    background: var(--paper-2);
+    color: var(--ink-2);
     font-family: var(--mono);
     font-size: 10px;
     letter-spacing: 0.08em;
@@ -655,8 +662,12 @@ body.dark .view-toggle {
     align-items: center;
     justify-content: center;
     gap: 5px;
-    transition: color 0.2s, border-color 0.2s;
-    margin-bottom: -0.5px;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.toggle-view-btn:hover {
+    color: var(--ink);
+    border-color: var(--ember-light);
 }
 
 .toggle-view-btn.active {
@@ -1432,14 +1443,14 @@ body.dark .view-toggle {
 
 body.dark .toggle-view-btn {
     color: var(--ink-3);
-    background: transparent;
-    border-bottom: 2px solid transparent;
+    background: var(--paper-2);
+    border-color: var(--border);
 }
 
 body.dark .toggle-view-btn.active {
     color: var(--ink);
-    background: transparent;
-    border-bottom-color: var(--ember);
+    background: var(--paper-2);
+    border-color: var(--ember);
 }
 
 /* Dark analysis box */
@@ -1744,6 +1755,47 @@ body.dark .card-map-btn:hover {
     margin-bottom: 6px;
 }
 
+.map-popup-hours {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+}
+
+.map-popup-hours.open-now {
+    color: #2D6A27;
+}
+
+.map-popup-hours.closed-now {
+    color: var(--ink-3);
+}
+
+/* Same shimmer skeleton the search results loading state uses (see
+   .skeleton-line / @keyframes shimmer), just scaled down to popup size —
+   the plain pulsing text tried here first read as "stuck", not "loading". */
+.map-popup-skeleton-line {
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--border) 25%, var(--paper) 50%, var(--border) 75%);
+    background-size: 300px 100%;
+    animation: shimmer 1.5s infinite;
+    margin-bottom: 6px;
+}
+
+.map-popup-hours .map-popup-skeleton-line {
+    width: 55px;
+    margin-bottom: 0;
+}
+
+.map-popup-summary .map-popup-skeleton-line:last-child {
+    width: 65%;
+    margin-bottom: 0;
+}
+
+body.dark .map-popup-hours.open-now {
+    color: #5A9E54;
+}
+
 
 /* Dark mode popup */
 body.dark .custom-popup .leaflet-popup-content-wrapper {
@@ -1793,6 +1845,8 @@ body.dark .map-popup-dot.high {
 
 .map-popup-route-btns {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 4px;
 }
 
