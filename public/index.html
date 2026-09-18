@@ -230,6 +230,27 @@
     // summary, so map popups and the list toggle adapt accordingly.
     let browseMode = false;
 
+    // Every restaurant name, review, and AI-generated description ultimately
+    // traces back to Google (business names, customer reviews) or a user's
+    // own typed query — none of it is safe to drop into innerHTML as-is.
+    // Run any such string through this before it goes into a template
+    // literal that ends up as innerHTML / setPopupContent. Pure numbers
+    // (distance, index) and this app's own hardcoded strings don't need it.
+    const ESCAPE_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return "";
+      return String(str).replace(/[&<>"']/g, (c) => ESCAPE_MAP[c]);
+    }
+
+    // Gates any Google-sourced "website" field before it becomes a clickable
+    // href — not because Google is expected to hand back a javascript: URL,
+    // but because nothing actually stops that field from being anything at
+    // all, and escaping alone only prevents breaking out of the attribute,
+    // not the URL's own scheme being dangerous.
+    function isSafeUrl(url) {
+      return typeof url === "string" && /^https?:\/\//i.test(url);
+    }
+
     // Search is actually 4-5 sequential backend steps (classify → find
     // places → filter by price → read reviews → rank), but there's no
     // streaming from the server to reflect real progress — this cycles
@@ -502,28 +523,33 @@
       const scoreClass = r.score >= 80 ? 'high' : r.score >= 50 ? 'medium' : 'low';
       const hasPrice = r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown';
       const ratingLabel = r.rating ? `<span class="no-wrap">★ ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>` : null;
-      const meta = [r.tags?.cuisine, formatDistance(r.distance_km), ratingLabel, hasPrice ? r.tags.price : null].filter(Boolean).join(' · ');
+      const meta = [
+        r.tags?.cuisine ? escapeHtml(r.tags.cuisine) : null,
+        formatDistance(r.distance_km),
+        ratingLabel,
+        hasPrice ? escapeHtml(r.tags.price) : null,
+      ].filter(Boolean).join(' · ');
       const description = r.summary || (r.review_quote ? `“${r.review_quote}”` : null);
       // hours_status text itself already says "Closes ..." vs "Opens ..." —
       // reading that prefix instead of a separate open_now flag means this
       // works whether r came from a real search (which sets open_now) or a
       // browse-mode /place-details fetch (which doesn't).
       const hoursLine = r.hours_status
-        ? `<div class="map-popup-hours ${r.hours_status.startsWith('Closes') ? 'open-now' : 'closed-now'}">${r.hours_status}</div>`
+        ? `<div class="map-popup-hours ${r.hours_status.startsWith('Closes') ? 'open-now' : 'closed-now'}">${escapeHtml(r.hours_status)}</div>`
         : (browseMode && !r._detailsLoaded ? `<div class="map-popup-hours"><div class="map-popup-skeleton-line"></div></div>` : '');
       // The description arrives after hours/phone/website (see
       // loadBrowseMarkerDetails) — its own loading skeleton so the popup
       // doesn't just sit there looking finished-but-empty while the LLM
       // call is still in flight.
       const descriptionBlock = description
-        ? `<div class="map-popup-divider"></div><div class="map-popup-summary">${description}</div>`
+        ? `<div class="map-popup-divider"></div><div class="map-popup-summary">${escapeHtml(description)}</div>`
         : (browseMode && r._descriptionLoading
             ? `<div class="map-popup-divider"></div><div class="map-popup-summary"><div class="map-popup-skeleton-line" style="width:100%"></div><div class="map-popup-skeleton-line"></div></div>`
             : '');
       return `
         <div class="map-popup">
           <div class="map-popup-header">
-            <span class="map-popup-name">${r.name}</span>
+            <span class="map-popup-name">${escapeHtml(r.name)}</span>
             ${hasScore ? `<span class="map-popup-dot ${scoreClass}"></span>` : ''}
           </div>
           <div class="map-popup-meta">${meta}</div>
@@ -532,8 +558,8 @@
           <div class="map-popup-footer">
             <button class="map-popup-list-btn" onclick="${browseMode ? `deepDiveRestaurant(${index})` : `focusOnList(${index})`}">View in list</button>
             <div class="map-popup-route-btns">
-              ${r.phone ? `<a class="map-popup-route-btn" href="tel:${r.phone}" title="Call"><i class="ti ti-phone"></i></a>` : ''}
-              ${r.website ? `<a class="map-popup-route-btn" href="${r.website}" target="_blank" rel="noopener" title="Website"><i class="ti ti-world"></i></a>` : ''}
+              ${r.phone ? `<a class="map-popup-route-btn" href="tel:${escapeHtml(r.phone)}" title="Call"><i class="ti ti-phone"></i></a>` : ''}
+              ${r.website && isSafeUrl(r.website) ? `<a class="map-popup-route-btn" href="${escapeHtml(r.website)}" target="_blank" rel="noopener" title="Website"><i class="ti ti-world"></i></a>` : ''}
               ${(r.latitude && r.longitude) ? `
               <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'driving')" title="Route by car"><i class="ti ti-car"></i></button>
               <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'cycling')" title="Route by bike"><i class="ti ti-bike"></i></button>
@@ -645,13 +671,18 @@
     // that constraint and re-runs the search, instead of the old read-only
     // badges that only ever grew and never showed how to walk something back.
     function renderTags(a) {
+      // These fields are Claude's structured extraction, but they still
+      // echo pieces of the user's own free-text query back (e.g. "cuisine"
+      // could be nearly anything the model copied from the input) — never
+      // trusted enough to skip escaping just because it went through Claude
+      // first.
       const constraintTags = TAG_FIELDS
         .filter(t => a[t.field])
-        .map(t => `<span class="card-tag ${t.cls} removable-tag" onclick="removeConstraint('${t.field}')" title="Remove">${a[t.field]} <i class="ti ti-x"></i></span>`)
+        .map(t => `<span class="card-tag ${t.cls} removable-tag" onclick="removeConstraint('${t.field}')" title="Remove">${escapeHtml(a[t.field])} <i class="ti ti-x"></i></span>`)
         .join("");
 
       const mustNotTags = (a.must_not || [])
-        .map(item => `<span class="card-tag excluded removable-tag" onclick="removeMustNot('${item.replace(/'/g, "\\'")}')" title="Remove">no ${item} <i class="ti ti-x"></i></span>`)
+        .map(item => `<span class="card-tag excluded removable-tag" onclick="removeMustNot('${escapeHtml(item.replace(/'/g, "\\'"))}')" title="Remove">no ${escapeHtml(item)} <i class="ti ti-x"></i></span>`)
         .join("");
 
       return constraintTags + mustNotTags;
@@ -699,11 +730,19 @@
     // already-fetched results in the new unit without a fresh network call.
     function renderResults(results) {
       if (results.length === 0) {
-        resultsBox.innerHTML = `
-          <div class="no-results">
-            <p>Nothing quite fits what you're looking for</p>
-            <p>Try broadening your search or describing what you want differently</p>
-          </div>`;
+        // An off-topic query (see the /search short-circuit in server.js)
+        // never actually searched for anything — "nothing fits" would imply
+        // a real search came up empty, which is misleading here.
+        const emptyHtml = currentAnalysis?.off_topic
+          ? `<div class="no-results">
+              <p>That's outside what I can help with</p>
+              <p>Try describing a restaurant or type of food instead</p>
+            </div>`
+          : `<div class="no-results">
+              <p>Nothing quite fits what you're looking for</p>
+              <p>Try broadening your search or describing what you want differently</p>
+            </div>`;
+        resultsBox.innerHTML = emptyHtml;
         // The map tab shows its own "Finding restaurants..." spinner while a
         // search is in flight (written directly into #mapView, separate from
         // the list's own loading state) — on zero results this early return
@@ -717,10 +756,7 @@
           markers = [];
           document.getElementById('mapView').innerHTML = `
             <div style="height:100%;display:flex;align-items:center;justify-content:center;padding:24px;">
-              <div class="no-results">
-                <p>Nothing quite fits what you're looking for</p>
-                <p>Try broadening your search or describing what you want differently</p>
-              </div>
+              ${emptyHtml}
             </div>`;
         }
         return;
@@ -752,13 +788,13 @@
       // browse-mode result never does, and it still has a real rating and
       // distance worth showing.
       let cardTagsHtml = "";
-      if (r.tags?.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${r.tags.cuisine}</span>`;
-      else if (r.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${r.cuisine}</span>`;
+      if (r.tags?.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${escapeHtml(r.tags.cuisine)}</span>`;
+      else if (r.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${escapeHtml(r.cuisine)}</span>`;
       // Our own match score (when there is one) already shows as the big
       // number on the card — this is Google's independent rating, the
       // number a user can actually cross-check against Maps/TripAdvisor.
       if (r.rating) cardTagsHtml += `<span class="card-tag rating"><i class="ti ti-star-filled"></i> ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>`;
-      if (r.tags?.price) cardTagsHtml += `<span class="card-tag price">${r.tags.price}</span>`;
+      if (r.tags?.price) cardTagsHtml += `<span class="card-tag price">${escapeHtml(r.tags.price)}</span>`;
       const distanceLabel = formatDistance(r.distance_km);
       if (distanceLabel) cardTagsHtml += `<span class="card-tag highlight">${distanceLabel}</span>`;
       // hours_status ("Closes 10 PM", "Opens 11 AM tomorrow") comes from
@@ -766,7 +802,7 @@
       // open/closed boolean when a place has no parsed hours at all.
       if (r.hours_status) {
         const hoursClass = r.open_now === false ? "closed-now" : "open-now";
-        cardTagsHtml += `<span class="card-tag ${hoursClass}">${r.hours_status}</span>`;
+        cardTagsHtml += `<span class="card-tag ${hoursClass}">${escapeHtml(r.hours_status)}</span>`;
       } else if (r.open_now === true) {
         cardTagsHtml += `<span class="card-tag open-now">Open now</span>`;
       } else if (r.open_now === false) {
@@ -776,7 +812,7 @@
       let evidenceHtml = "";
       if (r.evidence && r.evidence.length > 0) {
         evidenceHtml = `<div class="evidence">${r.evidence.map(e =>
-          `<p><span class="evidence-quote">" </span>${e}</p>`
+          `<p><span class="evidence-quote">" </span>${escapeHtml(e)}</p>`
         ).join("")}</div>`;
       }
       const photoHtml = r.photo_reference
@@ -787,16 +823,19 @@
       // draw our own route with mode + distance/time, it just switches to
       // our map view instead (defaulting to driving, same as before).
       // Call/Website depend on Place Details having returned them (not
-      // every listing has both), so those two stay conditional.
+      // every listing has both), so those two stay conditional. Website is
+      // also scheme-checked — it's Google-sourced, not user-typed, but
+      // there's no reason to trust it enough to let a "javascript:" URL
+      // through as a clickable link.
       let actionsHtml = "";
       if (r.latitude && r.longitude) {
         actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); showRouteOnMap(${index}, 'driving')"><i class="ti ti-directions"></i> Directions</button>`;
       }
       if (r.phone) {
-        actionsHtml += `<a class="card-map-btn" href="tel:${r.phone}" onclick="event.stopPropagation()"><i class="ti ti-phone"></i> Call</a>`;
+        actionsHtml += `<a class="card-map-btn" href="tel:${escapeHtml(r.phone)}" onclick="event.stopPropagation()"><i class="ti ti-phone"></i> Call</a>`;
       }
-      if (r.website) {
-        actionsHtml += `<a class="card-map-btn" href="${r.website}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-world"></i> Website</a>`;
+      if (r.website && isSafeUrl(r.website)) {
+        actionsHtml += `<a class="card-map-btn" href="${escapeHtml(r.website)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-world"></i> Website</a>`;
       }
       // Google Places has no dedicated menu field — this is a search
       // shortcut, not a confirmed official menu link. It works even when
@@ -805,7 +844,13 @@
       // an address in the query.
       actionsHtml += `<a class="card-map-btn" href="https://www.google.com/search?q=${encodeURIComponent(r.name + " menu")}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-book-2"></i> Menu</a>`;
 
-      const escapedName = r.name.replace(/'/g, "\\'");
+      // JS-string-escape first (for the single-quoted argument inside
+      // onclick), then HTML-escape the result (for the double-quoted
+      // onclick="..." attribute itself) — a name containing a bare `"`
+      // would otherwise break out of the attribute entirely, which is a
+      // more direct injection than just landing in visible text.
+      const escapedName = escapeHtml(r.name.replace(/'/g, "\\'"));
+      const safeName = escapeHtml(r.name);
       const isSaved = isRestaurantSaved(r.name);
 
       // Answering a question needs real review text, which only exists
@@ -837,7 +882,7 @@
       // as the search-loading state) while that's still in flight.
       const description = r.summary || (r.review_quote ? `“${r.review_quote}”` : null);
       const summaryHtml = description
-        ? `<p class="card-summary">${description}</p>`
+        ? `<p class="card-summary">${escapeHtml(description)}</p>`
         : (browseMode && r._descriptionLoading
             ? `<div class="skeleton-line text1" style="margin-top:8px;"></div><div class="skeleton-line text2"></div>`
             : "");
@@ -846,16 +891,16 @@
         <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="toggleCardExpand(this, ${index})">
           ${photoHtml}
           <div class="card-header">
-            <span class="card-name">${r.name}</span>
+            <span class="card-name">${safeName}</span>
             <div class="card-header-right">
               <button class="save-heart-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveRestaurant('${escapedName}', this)" title="${isSaved ? 'Remove from saved' : 'Save'}">
                 <i class="ti ti-heart${isSaved ? '-filled' : ''}"></i>
               </button>
-              ${hasScore ? `<span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${scoreHint(r.score)}"` : ''}>${label}</span>` : ''}
+              ${hasScore ? `<span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${escapeHtml(scoreHint(r.score))}"` : ''}>${label}</span>` : ''}
             </div>
           </div>
           <div class="card-tags">${cardTagsHtml}</div>
-            ${hasScore && r.score < 80 ? `<p class="card-score-hint">${scoreHint(r.score)}</p>` : ''}
+            ${hasScore && r.score < 80 ? `<p class="card-score-hint">${escapeHtml(scoreHint(r.score))}</p>` : ''}
           ${summaryHtml}
           ${galleryHtml}
           ${evidenceHtml}
@@ -1161,7 +1206,9 @@
 
         currentAnalysis = data.analysis;
         if (query) lastQuery = query;
-        recordSearchHistory(data.analysis);
+        // A declined off-topic query isn't a real search — nothing worth
+        // resuming later, so it shouldn't clutter search history.
+        if (!data.analysis.off_topic) recordSearchHistory(data.analysis);
 
         const a = data.analysis;
         const tagsHtml = renderTags(a);
@@ -1173,7 +1220,7 @@
         analysisBox.innerHTML = `
           <div class="analysis-title">What I understood</div>
           ${locationWarningHtml}
-          <div class="analysis-interpretation">${a.interpretation}</div>
+          <div class="analysis-interpretation">${escapeHtml(a.interpretation)}</div>
           <div class="analysis-tags">${tagsHtml}</div>`;
         analysisBox.style.display = "block";
         error.style.display = "none";
@@ -1296,7 +1343,7 @@
       }
       container.innerHTML = history.map((h, i) =>
         `<div class="menu-item history-item" onclick="rerunHistoryEntry(${i})">
-          <span>${h.label}</span>
+          <span>${escapeHtml(h.label)}</span>
           <i class="ti ti-x" onclick="event.stopPropagation(); deleteHistoryEntry(${i})"></i>
         </div>`
       ).join("");
@@ -1374,11 +1421,11 @@
         return;
       }
       container.innerHTML = saved.map(r => {
-        const escapedName = r.name.replace(/'/g, "\\'");
+        const escapedName = escapeHtml(r.name.replace(/'/g, "\\'"));
         const hasCoords = r.latitude && r.longitude;
         return `
         <div class="menu-item saved-restaurant-item">
-          <span class="saved-restaurant-name" ${hasCoords ? `onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}', '_blank')"` : ''}>${r.name}</span>
+          <span class="saved-restaurant-name" ${hasCoords ? `onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}', '_blank')"` : ''}>${escapeHtml(r.name)}</span>
           <i class="ti ti-x" onclick="event.stopPropagation(); unsaveRestaurant('${escapedName}')"></i>
         </div>`;
       }).join("");
@@ -1871,10 +1918,10 @@
       chip.innerHTML = `
         <div class="chip-photo-wrap">
           ${photoHtml}
-          <span class="chip-badge">${data.label}</span>
+          <span class="chip-badge">${escapeHtml(data.label)}</span>
         </div>
         <span class="chip-text">
-          <span class="chip-name">${data.name}</span>
+          <span class="chip-name">${escapeHtml(data.name)}</span>
           <span class="chip-rating"><i class="ti ti-star-filled"></i> ${data.rating}</span>
         </span>`;
     }
@@ -2093,13 +2140,13 @@
             const photoHtml = r.photo_reference
               ? `<img class="saved-chip-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()">`
               : "";
-            const escapedName = r.name.replace(/'/g, "\\'");
+            const escapedName = escapeHtml(r.name.replace(/'/g, "\\'"));
             return `<div class="saved-chip" ${clickAttr}>
               <div class="saved-chip-photo-wrap">
                 ${photoHtml}
                 <i class="ti ti-heart-filled saved-chip-heart" onclick="event.stopPropagation(); unsaveRestaurant('${escapedName}')"></i>
               </div>
-              <span class="saved-chip-name">${r.name}</span>
+              <span class="saved-chip-name">${escapeHtml(r.name)}</span>
             </div>`;
           }).join("")}
         </div>`;
