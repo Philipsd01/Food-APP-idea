@@ -22,6 +22,10 @@
     --serif: 'Playfair Display', Georgia, serif;
     --sans: 'DM Sans', -apple-system, sans-serif;
     --mono: 'DM Mono', monospace;
+    /* Approximate .bottom-nav content height, excluding its own safe-area
+       padding (added separately wherever this is used) — a shared number
+       so the bottom sheet can stop exactly above it instead of covering it. */
+    --bottom-nav-h: 64px;
 
     /* Light mode chip states */
     --chip-filled-bg: var(--ink);
@@ -85,27 +89,6 @@ body {
 }
 
 body.dark .top-bar {
-    background: #14110F;
-}
-
-.view-toggle {
-    display: flex;
-    justify-content: center;
-    gap: 0;
-    margin-bottom: 14px;
-    margin-left: -20px;
-    margin-right: -20px;
-    padding-left: 20px;
-    padding-right: 20px;
-    padding-bottom: 10px;
-    border-bottom: 0.5px solid var(--border);
-    position: sticky;
-    top: 58px;
-    z-index: 10;
-    background: var(--paper);
-}
-
-body.dark .view-toggle {
     background: #14110F;
 }
 
@@ -642,44 +625,6 @@ body.dark .view-toggle {
 }
 
 
-/* Only one of these two is ever visible at a time (see
-   updateViewToggleButtons in index.html) — it always names the OTHER view,
-   so it reads as "switch to Map" rather than a "you are here" tab. A small
-   standalone pill fits that better than the old two-column tab-strip look,
-   which only made sense when both buttons shared one row. */
-.toggle-view-btn {
-    flex: none;
-    padding: 7px 16px;
-    border: 0.5px solid var(--border);
-    border-radius: 20px;
-    background: var(--paper-2);
-    color: var(--ink-2);
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    transition: color 0.2s, border-color 0.2s, background 0.2s;
-}
-
-.toggle-view-btn:hover {
-    color: var(--ink);
-    border-color: var(--ember-light);
-}
-
-.toggle-view-btn.active {
-    color: var(--ink);
-    border-bottom-color: var(--ember-light);
-    background: transparent;
-}
-
-.toggle-view-btn i {
-    font-size: 13px;
-}
-
 /* ── Results ── */
 .results {
     display: flex;
@@ -873,6 +818,64 @@ body.dark .view-toggle {
     color: var(--ember);
 }
 
+/* Browse mode's real-review fallback (see buildCardHtml/toggleReviewQuotes)
+   — collapsed behind its own tap rather than always shown, since the sheet
+   it lives in is already forceExpanded and three full review quotes are
+   real added height on top of that. */
+.review-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: var(--paper-2);
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    margin-top: 8px;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+
+.review-toggle-arrow {
+    font-size: 13px;
+    color: var(--ink-3);
+    transition: transform 0.25s ease;
+}
+
+.review-toggle-arrow.flipped {
+    transform: rotate(180deg);
+}
+
+.review-quotes {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+    padding-top: 0;
+}
+
+.review-quotes.open {
+    /* Was 400px, tall enough to unfold all three reviews at once — reads
+       as a wall of text suddenly taking over the sheet rather than a small
+       reveal. This shows enough to confirm something opened (about one
+       review) and scrolls internally for the rest, instead of pushing
+       everything below it further down the page. */
+    max-height: 130px;
+    overflow-y: auto;
+    opacity: 1;
+    padding-top: 10px;
+}
+
+.review-quotes p {
+    font-size: 11px;
+    color: var(--ink-3);
+    margin-bottom: 5px;
+    line-height: 1.5;
+    font-style: italic;
+}
+
 /* Ask about this restaurant — collapses/expands with the rest of the
    card's extra content, same as .evidence above. */
 .ask-box {
@@ -884,7 +887,13 @@ body.dark .view-toggle {
 }
 
 .card.expanded .ask-box {
-    max-height: 200px;
+    /* Was 200px — a real answer plus its input row routinely ran past that
+       and got hard-clipped by this box's own overflow:hidden, right at
+       whatever line happened to sit on the boundary (reads as "a letter
+       cut off into the buttons below" rather than a clean cutoff). The
+       sheet/card container already scrolls on its own, so there's no
+       reason this needs to stay this tight. */
+    max-height: 600px;
     opacity: 1;
     padding-top: 10px;
 }
@@ -933,7 +942,9 @@ body.dark .view-toggle {
 }
 
 .ask-answer {
-    margin: 8px 0 0;
+    /* Bottom margin so a real answer doesn't butt straight up against the
+       Directions/Call/etc. row right below it. */
+    margin: 8px 0 10px;
     font-size: 12px;
     line-height: 1.5;
     color: var(--ink-2);
@@ -1052,23 +1063,6 @@ body.dark .view-toggle {
 .no-results p:last-child {
     font-size: 12px;
     color: var(--ink-3);
-}
-
-/* ── Map ── */
-.map-spinner {
-    width: 28px;
-    height: 28px;
-    border: 2px solid var(--border);
-    border-top-color: var(--ink);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin: 0 auto;
-}
-
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
 }
 
 /* ── Side menu ── */
@@ -1436,23 +1430,6 @@ body.dark .card:hover {
         0 2px 10px rgba(0, 0, 0, 0.4);
 }
 
-/* FIX 03: View toggle — underline style in dark mode */
-body.dark .view-toggle {
-    border-bottom-color: var(--border);
-}
-
-body.dark .toggle-view-btn {
-    color: var(--ink-3);
-    background: var(--paper-2);
-    border-color: var(--border);
-}
-
-body.dark .toggle-view-btn.active {
-    color: var(--ink);
-    background: var(--paper-2);
-    border-color: var(--ember);
-}
-
 /* Dark analysis box */
 body.dark .analysis {
     background: #1C1814;
@@ -1736,6 +1713,9 @@ body.dark .card-map-btn:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    /* Now its own tap target (see initMap/toggleTheme's tooltipEl click
+       listener), not just decorative text next to the pin. */
+    cursor: pointer;
 }
 
 .marker-label::before {
@@ -1806,23 +1786,6 @@ body.dark .custom-popup .leaflet-popup-content-wrapper {
 
 body.dark .custom-popup .leaflet-popup-tip {
     background: var(--card-bg);
-}
-
-/* ── Route line label ── */
-.route-tooltip {
-    background: var(--card-bg);
-    border: 0.5px solid var(--border);
-    border-radius: 6px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
-    padding: 2px 8px;
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.04em;
-    color: var(--ink-1);
-}
-
-.route-tooltip::before {
-    border-top-color: var(--card-bg);
 }
 
 .clear-route-control a:hover {
@@ -2069,9 +2032,21 @@ body.dark .card-tag.open-now {
    overlay on the map, instead of a separate list screen) ── */
 .sheet-backdrop {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    /* Stops above the bottom nav instead of covering it — same idea as
+       Spotify's mini-player or a shopping app's "add to cart" sheet,
+       primary navigation stays reachable while this is open. */
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
     background: rgba(0, 0, 0, 0.35);
-    z-index: 25;
+    /* Leaflet's own panes/controls sit at z-index up to ~1000 inside
+       #mapView, which has no z-index of its own to trap them below this —
+       so this has to clear that (same reasoning as .menu-overlay above)
+       to actually appear in front of the map instead of behind its tiles/
+       markers/zoom control. Still under .lightbox (2000) so a photo tapped
+       from inside the sheet can open on top of it. */
+    z-index: 1550;
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.25s ease;
@@ -2086,19 +2061,29 @@ body.dark .card-tag.open-now {
     position: fixed;
     left: 0;
     right: 0;
+    /* Anchored at the true bottom (not above the nav) specifically so the
+       closed state below is reliably fully hidden regardless of content
+       height — see .bottom-sheet.open for where the nav gap actually gets
+       applied instead. */
     bottom: 0;
-    z-index: 26;
+    z-index: 1551;
     max-width: 480px;
     margin: 0 auto;
-    max-height: 75vh;
+    /* More room per the "feels cramped" feedback — still capped well short
+       of the full screen so the map stays visibly present above it. */
+    max-height: 85vh;
     display: flex;
     flex-direction: column;
     background: var(--paper);
     border-radius: 18px 18px 0 0;
     box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
+    /* Always a full 100% of THIS box's own height, so it's fully off-screen
+       no matter how tall the content is — the bug this replaced was using
+       a fixed bottom-nav-height offset here, which only fully hid a sheet
+       taller than that offset; an empty/short one left a residual strip
+       visible right over the nav. */
     transform: translateY(100%);
     transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 @media (min-width: 768px) {
@@ -2114,7 +2099,11 @@ body.dark .card-tag.open-now {
 }
 
 .bottom-sheet.open {
-    transform: translateY(0);
+    /* Pulls the box up from its true-bottom anchor by exactly the nav's
+       height instead of repositioning `bottom` itself — this is what
+       actually keeps it clear of the nav while open, without touching the
+       closed-state math above. */
+    transform: translateY(calc(-1 * (var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px))));
 }
 
 .sheet-handle-row {
@@ -2123,7 +2112,11 @@ body.dark .card-tag.open-now {
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 10px 0 6px;
+    padding: 12px 0 10px;
+    /* Tall enough to fully contain .sheet-close-btn below (8px top + 26px
+       tall = 34px) — it was taller than this row's own content height,
+       so it spilled past the row's bottom edge into the photo below it. */
+    min-height: 40px;
     cursor: grab;
     touch-action: none;
 }
@@ -2138,7 +2131,133 @@ body.dark .card-tag.open-now {
 .sheet-close-btn {
     position: absolute;
     right: 12px;
-    top: 6px;
+    top: 8px;
+    background: var(--paper-2);
+    border: 0.5px solid var(--border);
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+
+.sheet-close-btn i {
+    font-size: 13px;
+}
+
+.sheet-content {
+    overflow-y: auto;
+    padding: 4px 20px 24px;
+}
+
+/* ── Route panel (persistent directions control — see showRouteOnMap) ── */
+.route-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
+    /* Same tier as the bottom sheet, same reason — Leaflet's own panes and
+       controls inside #mapView sit at z-index up to ~1000, and #mapView
+       itself has no z-index to trap them below this. */
+    z-index: 1551;
+    max-width: 480px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--paper);
+    border: 0.5px solid var(--border);
+    border-bottom: none;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.15);
+    padding: 10px 12px;
+}
+
+.route-panel[hidden] {
+    display: none;
+}
+
+@media (min-width: 768px) {
+    .route-panel {
+        max-width: 800px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .route-panel {
+        max-width: 960px;
+    }
+}
+
+.route-panel-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    /* Same accent language as .card-summary elsewhere — ties this to the
+       rest of the app's card treatment instead of reading as a plain,
+       unstyled system toast. */
+    border-left: 1.5px solid var(--ember);
+    padding-left: 10px;
+}
+
+.route-panel-label {
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
+.route-panel-name {
+    font-family: var(--serif);
+    font-size: 14px;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.route-panel-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+    letter-spacing: 0.04em;
+}
+
+.route-panel-modes {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+    border-left: 0.5px solid var(--border);
+    padding-left: 10px;
+}
+
+.route-mode-btn {
+    background: var(--paper-2);
+    border: 0.5px solid var(--border);
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ink-2);
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.route-mode-btn.active {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: transparent;
+}
+
+.route-panel-close {
     background: var(--paper-2);
     border: 0.5px solid var(--border);
     border-radius: 50%;
@@ -2149,9 +2268,79 @@ body.dark .card-tag.open-now {
     justify-content: center;
     color: var(--ink-2);
     cursor: pointer;
+    flex-shrink: 0;
 }
 
-.sheet-content {
+/* ── Results sheet (real search's ranked matches, over the always-visible
+   map — see setResultsSheetState) ── */
+.results-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
+    z-index: 1551;
+    max-width: 480px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    background: var(--paper);
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
+    /* Peek height by default — tall enough to read "What I understood" and
+       the constraint tags, not tall enough to show any result cards, which
+       is what invites dragging/tapping it open rather than it looking like
+       the full list already. */
+    height: 190px;
+    transition: height 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    overflow: hidden;
+}
+
+.results-sheet[hidden] {
+    display: none;
+}
+
+.results-sheet.full {
+    height: 85vh;
+}
+
+@media (min-width: 768px) {
+    .results-sheet {
+        max-width: 800px;
+    }
+}
+
+@media (min-width: 1024px) {
+    .results-sheet {
+        max-width: 960px;
+    }
+}
+
+.results-sheet-handle-row {
+    flex-shrink: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    padding: 10px 0 8px;
+    cursor: pointer;
+}
+
+.results-sheet-arrow {
+    font-size: 13px;
+    color: var(--ink-3);
+    transition: transform 0.3s ease;
+}
+
+.results-sheet.full .results-sheet-arrow {
+    transform: rotate(180deg);
+}
+
+.results-sheet-scroll {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 0 20px 20px;
 }

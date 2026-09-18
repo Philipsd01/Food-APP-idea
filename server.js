@@ -990,6 +990,12 @@ app.get("/showcase", async (req, res) => {
         rating: best.rating,
         review_count: best.user_ratings_total || 0,
         photo_reference: best.photos?.[0]?.photo_reference || null,
+        // Lets the front end open this one restaurant directly (bottom
+        // sheet) instead of re-running it through a full /search — same
+        // fields /nearby already returns for the same reason.
+        place_id: best.place_id,
+        latitude: best.geometry?.location?.lat ?? null,
+        longitude: best.geometry?.location?.lng ?? null,
       };
     }));
     res.json({ items: items.filter(Boolean) });

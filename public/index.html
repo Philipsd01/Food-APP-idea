@@ -135,11 +135,11 @@
       </button>
     </div>
 
-    <p class="header-label">discover</p>
-    <p class="header-title">Search smarter, eat better</p>
-    <p class="header-subtitle" id="headerSubtitle" style="display: none;">Understands &ldquo;quiet ramen for a rainy date night&rdquo; — not just keywords.</p>
-
-    <div class="analysis" id="analysis"></div>
+    <div class="header-decor" id="headerDecor">
+      <p class="header-label">discover</p>
+      <p class="header-title">Search smarter, eat better</p>
+      <p class="header-subtitle" id="headerSubtitle" style="display: none;">Understands &ldquo;quiet ramen for a rainy date night&rdquo; — not just keywords.</p>
+    </div>
 
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="Describe what you're looking for...">
@@ -174,23 +174,30 @@
       </div>
     </div>
 
-    <div class="loading" id="loading"></div>
     <div class="error" id="error">Something went wrong. Try again.</div>
 
-    <div class="view-toggle" id="viewToggle" style="display: none;">
-      <button class="toggle-view-btn active" id="btnList" onclick="switchView('list')">
-        <i class="ti ti-list"></i> List
-      </button>
-      <button class="toggle-view-btn" id="btnMap" onclick="switchView('map')">
-        <i class="ti ti-map"></i> Map
-      </button>
-    </div>
-
-    <div class="results" id="results"></div>
     <div id="mapView"
-      style="display: none; height: calc(100vh - 380px); min-height: 320px; max-height: 480px; border-radius: 12px; overflow: hidden; margin-top: 10px;">
+      style="display: none; min-height: 320px; border-radius: 12px; overflow: hidden; margin-top: 10px;">
     </div>
   </div>
+  </div>
+
+  <!-- A real search's ranked matches, as a sheet over the always-visible
+       map instead of a separate full-page list — same reasoning as the
+       single-restaurant sheet, but this one is never fully dismissible
+       (see setResultsSheetState): comparing several ranked results is the
+       actual point of a search, so the list is always at least peeking,
+       just collapsible down to make more room for the map. -->
+  <div class="results-sheet" id="resultsSheet" hidden>
+    <button type="button" class="results-sheet-handle-row" id="resultsSheetHandleRow" onclick="toggleResultsSheetState()">
+      <div class="sheet-handle"></div>
+      <i class="ti ti-chevron-up results-sheet-arrow" id="resultsSheetArrow"></i>
+    </button>
+    <div class="results-sheet-scroll" id="resultsSheetScroll">
+      <div class="loading" id="loading"></div>
+      <div class="analysis" id="analysis"></div>
+      <div class="results" id="results"></div>
+    </div>
   </div>
 
   <!-- Prototype (see updateMapNavIcon/deepDiveRestaurant comments): a
@@ -207,6 +214,28 @@
       </button>
     </div>
     <div class="sheet-content" id="sheetContent"></div>
+  </div>
+
+  <!-- Directions used to be escapable only by re-tapping the marker to
+       reopen its popup and finding the small X inside it — too many taps
+       once other markers are hidden and the popup itself is closed while
+       routing (see showRouteOnMap). This is always reachable instead,
+       Google-Maps-style: name, distance/time, mode switch, and exit, all
+       in one place regardless of what's currently open on the map. -->
+  <div class="route-panel" id="routePanel" hidden>
+    <div class="route-panel-info">
+      <span class="route-panel-label">Directions to</span>
+      <span class="route-panel-name" id="routePanelName"></span>
+      <span class="route-panel-meta" id="routePanelMeta">Calculating route…</span>
+    </div>
+    <div class="route-panel-modes">
+      <button class="route-mode-btn" id="routeModeBtn-driving" onclick="setRouteMode('driving')" title="Drive"><i class="ti ti-car"></i></button>
+      <button class="route-mode-btn" id="routeModeBtn-cycling" onclick="setRouteMode('cycling')" title="Bike"><i class="ti ti-bike"></i></button>
+      <button class="route-mode-btn" id="routeModeBtn-walking" onclick="setRouteMode('walking')" title="Walk"><i class="ti ti-walk"></i></button>
+    </div>
+    <button class="route-panel-close" onclick="clearRoute()" title="Exit directions">
+      <i class="ti ti-x"></i>
+    </button>
   </div>
 
   <!-- Comparison alternative to the top-bar hamburger + map-pin — same four
@@ -273,6 +302,10 @@
     // restaurant someone is actually looking at right now, instead of
     // falling back to whatever was last deep-dived (or nothing).
     let activeMapIndex = null;
+    // Whether the real-search results sheet (see setResultsSheetState) is
+    // expanded to show the full ranked list, or just peeking — it's never
+    // fully closed the way the single-restaurant sheet can be.
+    let resultsSheetFull = false;
 
     // Every restaurant name, review, and AI-generated description ultimately
     // traces back to Google (business names, customer reviews) or a user's
@@ -625,8 +658,8 @@
       return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + '…';
     }
 
-    // Whichever of the marker's popup / the single-card deep-dive view (see
-    // renderSingleCard) is actually showing this result right now gets
+    // Whichever of the marker's popup / the bottom sheet (see
+    // openBottomSheet) is actually showing this result right now gets
     // refreshed — loadBrowseMarkerDetails doesn't need to know or care which
     // one that is, since either, both, or neither can be true at once.
     function refreshBrowseResultDisplay(index) {
@@ -635,7 +668,13 @@
       if (marker && marker.isPopupOpen()) marker.setPopupContent(makePopupHtml(r, index));
       if (singleCardIndex === index) {
         const sheetContent = document.getElementById('sheetContent');
-        if (sheetContent) sheetContent.innerHTML = buildCardHtml(r, index);
+        if (sheetContent) {
+          sheetContent.innerHTML = buildCardHtml(r, index, true);
+          // The re-render above replaces the whole card, including the
+          // gallery container loadExtraPhotos already filled in — refill it
+          // (cheap: r.photos is already in memory, no fetch involved).
+          loadExtraPhotos(index);
+        }
       }
     }
 
@@ -660,6 +699,10 @@
         r.phone = details.phone;
         r.website = details.website;
         reviews = details.reviews || [];
+        // Kept in full (not just reviews[0]) so the sheet can show a few
+        // real customer quotes alongside the AI description — see
+        // buildCardHtml's evidenceHtml fallback below.
+        r.reviews = reviews;
         // Same reasoning as the real-search enrichment in server.js: Text
         // Search only ever gave one photo, Place Details' own list (already
         // fetched here for free) has up to 5 — and its refs don't match Text
@@ -714,8 +757,21 @@
     function openBottomSheet(index) {
       const r = currentResults[index];
       if (!r) return;
+      // A restaurant's sheet and the route panel share the same fixed
+      // position and z-index — deepDiveRestaurant (tapping "View details"
+      // in a marker's popup) was the one path into this that never cleared
+      // a route left active from an earlier Directions tap, leaving that
+      // panel stuck on screen fighting the sheet for the same space instead
+      // of the sheet actually showing through it. showRouteOnMap already
+      // does the mirror image of this (closeBottomSheet before drawing a
+      // route) — the two are meant to always be mutually exclusive.
+      clearRoute();
       singleCardIndex = index;
-      document.getElementById('sheetContent').innerHTML = buildCardHtml(r, index);
+      document.getElementById('sheetContent').innerHTML = buildCardHtml(r, index, true);
+      // loadExtraPhotos normally only runs once a card is tap-expanded —
+      // this card starts already expanded (see buildCardHtml's
+      // forceExpanded), so nothing else would ever trigger it.
+      loadExtraPhotos(index);
       document.getElementById('bottomSheet').classList.add('open');
       document.getElementById('sheetBackdrop').classList.add('open');
       const marker = markers[index];
@@ -748,19 +804,26 @@
     (function setupSheetDrag() {
       const sheet = document.getElementById('bottomSheet');
       const handle = document.getElementById('sheetHandleRow');
-      let startY = 0, dragY = 0, dragging = false;
+      let startY = 0, dragY = 0, baseOffsetY = 0, dragging = false;
 
       handle.addEventListener('pointerdown', (e) => {
         dragging = true;
         startY = e.clientY;
         dragY = 0;
+        // The sheet's resting "open" position isn't translateY(0) — it's
+        // pulled up by the bottom-nav's height (see .bottom-sheet.open) —
+        // so the drag has to add its offset on top of whatever that
+        // actually computes to right now, not overwrite it, or the sheet
+        // would visibly jump down by that amount the instant a drag starts.
+        const matrix = new DOMMatrixReadOnly(getComputedStyle(sheet).transform);
+        baseOffsetY = matrix.m42;
         sheet.style.transition = 'none';
         handle.setPointerCapture(e.pointerId);
       });
       handle.addEventListener('pointermove', (e) => {
         if (!dragging) return;
         dragY = Math.max(0, e.clientY - startY);
-        sheet.style.transform = `translateY(${dragY}px)`;
+        sheet.style.transform = `translateY(${baseOffsetY + dragY}px)`;
       });
       const endDrag = () => {
         if (!dragging) return;
@@ -848,6 +911,8 @@
     // Pulled out of search() so a Distance Unit toggle can re-render the
     // already-fetched results in the new unit without a fresh network call.
     function renderResults(results) {
+      document.getElementById('resultsSheet').hidden = false;
+
       if (results.length === 0) {
         // An off-topic query (see the /search short-circuit in server.js)
         // never actually searched for anything — "nothing fits" would imply
@@ -862,42 +927,34 @@
               <p>Try broadening your search or describing what you want differently</p>
             </div>`;
         resultsBox.innerHTML = emptyHtml;
-        // The map tab shows its own "Finding restaurants..." spinner while a
-        // search is in flight (written directly into #mapView, separate from
-        // the list's own loading state) — on zero results this early return
-        // used to skip past it entirely, leaving that spinner on screen
-        // forever with nothing telling the user the search had actually
-        // finished and come up empty.
-        if (document.getElementById('btnMap').classList.contains('active')) {
-          if (map) { map.remove(); }
-          map = null;
-          tileLayer = null;
-          markers = [];
-          document.getElementById('mapView').innerHTML = `
-            <div style="height:100%;display:flex;align-items:center;justify-content:center;padding:24px;">
-              ${emptyHtml}
-            </div>`;
-        }
+        // The map itself (already visible and centered on the user — see
+        // search()) is left exactly as it was rather than replaced with a
+        // second copy of this same message; just nothing to pin on it.
+        markers.forEach(m => m.remove());
+        markers = [];
+        clearRoute();
         return;
       }
 
-      if (document.getElementById('btnMap').classList.contains('active')) {
-        initMap(results);
-      }
-
+      initMap(results);
       resultsBox.innerHTML = "";
       results.forEach((r, index) => {
         resultsBox.innerHTML += buildCardHtml(r, index);
       });
     }
 
-    // Pulled out of renderResults so a single browse-mode restaurant (see
-    // renderSingleCard / deepDiveRestaurant) can get the exact same card
-    // treatment — photos, gallery, ask box — without a real scored search
+    // Pulled out of renderResults so a single restaurant shown in the
+    // bottom sheet (see openBottomSheet / deepDiveRestaurant) can get the
+    // exact same card treatment — photos, gallery, ask box — without a real scored search
     // behind it. Every score/tags/summary field below is optional for
     // exactly that reason: a browse-mode r has none of them at first, only
     // whatever loadBrowseMarkerDetails has filled in so far.
-    function buildCardHtml(r, index) {
+    // forceExpanded skips the collapsed starting state entirely — used for
+    // the bottom sheet (see openBottomSheet), where tapping "View details"
+    // already was the "show me everything" gesture, so a second tap inside
+    // to reveal photos/reviews/ask-box would just be redundant friction.
+    // Regular list/map-popup cards still default to collapsed (false).
+    function buildCardHtml(r, index, forceExpanded = false) {
       const hasScore = typeof r.score === "number";
       const scoreClass = r.score >= 80 ? "high" : r.score >= 50 ? "medium" : "low";
       const label = scoreLabel(r.score);
@@ -933,6 +990,24 @@
         evidenceHtml = `<div class="evidence">${r.evidence.map(e =>
           `<p><span class="evidence-quote">" </span>${escapeHtml(e)}</p>`
         ).join("")}</div>`;
+      } else if (r.reviews && r.reviews.length > 0) {
+        // Browse mode never has AI-scoring evidence (r.evidence) — that's
+        // Sonnet's "why this matched your search" output, specific to a
+        // real query. Real customer review excerpts fill the same visual
+        // slot instead — but unlike that (short, always-shown) evidence,
+        // three full review quotes are real added height on a sheet that's
+        // already forceExpanded, so this stays behind its own tap instead
+        // of piling directly onto everything else always being visible.
+        evidenceHtml = `
+          <button class="review-toggle-btn" onclick="event.stopPropagation(); toggleReviewQuotes(${index})">
+            <span>See what people are saying</span>
+            <i class="ti ti-chevron-down review-toggle-arrow${r._reviewsExpanded ? ' flipped' : ''}" id="reviewArrow-${index}"></i>
+          </button>
+          <div class="review-quotes${r._reviewsExpanded ? ' open' : ''}" id="reviewQuotes-${index}">
+            ${r.reviews.slice(0, 3).map(rev =>
+              `<p><span class="evidence-quote">" </span>${escapeHtml(truncateReview(rev, 160))}</p>`
+            ).join("")}
+          </div>`;
       }
       const photoHtml = r.photo_reference
         ? `<img class="card-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()" onclick="event.stopPropagation(); openLightboxFromCard(${index}, -1)">`
@@ -1007,7 +1082,7 @@
             : "");
 
       return `
-        <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="toggleCardExpand(this, ${index})">
+        <div class="card ${forceExpanded ? 'expanded' : ''}" style="animation-delay: ${index * 0.08}s;" ${forceExpanded ? '' : `onclick="toggleCardExpand(this, ${index})"`}>
           ${photoHtml}
           <div class="card-header">
             <span class="card-name">${safeName}</span>
@@ -1026,29 +1101,25 @@
           ${askBoxHtml}
           <div class="card-footer">
             <div class="card-actions">
+              <!-- "Show on map" only makes sense from a list of results you
+                   scrolled to find this one in — the sheet (forceExpanded)
+                   is reached by tapping this exact restaurant's marker, so
+                   the map it'd jump to is the one already right there. -->
+              ${forceExpanded ? '' : `
               <button class="card-map-btn" onclick="event.stopPropagation(); focusOnMap(${index})">
                 <i class="ti ti-map-pin"></i> Show on map
-              </button>
+              </button>`}
               ${actionsHtml}
             </div>
-            <div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>
+            ${forceExpanded ? '' : '<div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>'}
           </div>
         </div>`;
     }
 
-    // The list showing exactly one restaurant — a browse-mode "deep dive"
-    // (see deepDiveRestaurant) rather than a real search's full results, so
-    // it can't reuse renderResults' index-per-DOM-position assumption
-    // (focusOnList scrolls to querySelectorAll('.card')[index], which only
-    // holds when every card 0..n is actually rendered).
+    // Tracks whichever restaurant the bottom sheet (see openBottomSheet) is
+    // currently showing, if any — every "peek at one restaurant" path now
+    // goes through that sheet, none of them navigate to a separate screen.
     let singleCardIndex = null;
-    function renderSingleCard(index) {
-      const r = currentResults[index];
-      if (!r) return;
-      singleCardIndex = index;
-      resultsBox.innerHTML = buildCardHtml(r, index);
-      switchView('list');
-    }
 
     function toggleCardExpand(cardEl, index) {
       const wasExpanded = cardEl.classList.contains('expanded');
@@ -1066,6 +1137,23 @@
         // the top does nothing and collapsing back never scrolls at all.
         cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
+    }
+
+    // Browse mode's real-review quotes (see buildCardHtml) get their own
+    // toggle instead of riding on the whole card's expand state — that
+    // card is always forceExpanded already, so this is the one thing left
+    // that's actually collapsed by default. Persisted on r itself (not just
+    // the DOM) since loadBrowseMarkerDetails re-renders this card in place
+    // as hours/description arrive, which would otherwise silently re-close it.
+    function toggleReviewQuotes(index) {
+      const el = document.getElementById(`reviewQuotes-${index}`);
+      if (!el) return;
+      const nowOpen = !el.classList.contains('open');
+      el.classList.toggle('open', nowOpen);
+      const arrow = document.getElementById(`reviewArrow-${index}`);
+      if (arrow) arrow.classList.toggle('flipped', nowOpen);
+      const r = currentResults[index];
+      if (r) r._reviewsExpanded = nowOpen;
     }
 
     function loadExtraPhotos(index) {
@@ -1232,42 +1320,19 @@
       document.getElementById("maxResultsLabel").textContent = maxResults;
     }
 
-    // Shared between search() (map tab already active when a search starts)
-    // and switchView() (someone switches to the map tab mid-search) — both
-    // need to be able to put this spinner up, not just whichever one used to
-    // build it inline.
-    function showMapLoadingSpinner() {
-      // Leaflet marks its container element internally when a map is created there.
-      // Wiping the container's HTML without calling map.remove() first leaves that
-      // marker in place, so the next L.map() call on it throws "already initialized".
-      if (map) { map.remove(); }
-      document.getElementById('mapView').innerHTML = `
-        <div style="height:100%;display:flex;align-items:center;justify-content:center;background:var(--paper-2);border-radius:12px;">
-          <div style="text-align:center;color:var(--ink-3);">
-            <div class="map-spinner"></div>
-            <p class="loading-status" style="margin-top:12px;margin-bottom:0;"></p>
-          </div>
-        </div>`;
-      map = null;
-      tileLayer = null;
-      markers = [];
-      routeLine = null;
-      routeTargetIndex = null;
-    }
-
     async function search(directAnalysis) {
       const query = directAnalysis ? "" : searchInput.value.trim();
       if (!directAnalysis && !query) return;
 
       stopSuggestionChips();
-      // A real search always replaces plain map-browsing — restore the List
-      // option that browseNearbyOnMap() hides (there's a scored list again),
-      // and drop any single-card deep dive so renderResults' full list
-      // takes over resultsBox instead of getting overwritten mid-render.
+      // A real search always replaces plain map-browsing, and drops any
+      // single-restaurant deep dive so renderResults' full list takes over
+      // #results instead of getting overwritten mid-render.
       browseMode = false;
       singleCardIndex = null;
       activeMapIndex = null;
-      document.getElementById('btnList').style.display = '';
+      closeBottomSheet();
+      clearRoute();
 
       // Only the immediately preceding message is needed here — analyzeQuery
       // uses it purely to detect refine/pivot/new signals ("but", "actually",
@@ -1275,8 +1340,6 @@
       const previousQuery = lastQuery || null;
 
       resultsBox.innerHTML = "";
-      document.getElementById('viewToggle').style.display = 'none';
-
       loading.innerHTML = `
         <p class="loading-status" id="loadingStatus"></p>
         <div class="skeleton-card">
@@ -1291,16 +1354,18 @@
           <div class="skeleton-line text1"></div>
           <div class="skeleton-line text2"></div>
         </div>`;
-
-      const activeView = document.getElementById('btnMap').classList.contains('active') ? 'map' : 'list';
       isLoading = true;
-      loading.style.display = activeView === 'list' ? "block" : "none";
+      loading.style.display = "block";
 
-      if (activeView === 'map') showMapLoadingSpinner();
+      // The map is the backdrop from the moment a search starts, not just
+      // once results arrive — showing it immediately (centered on wherever
+      // the user already is, no pins yet) reads as "already working on it"
+      // instead of the map only appearing once everything's ready. The
+      // results sheet opens to 'full' now too, for the skeleton to sit in.
+      switchView();
+      document.getElementById('resultsSheet').hidden = false;
+      setResultsSheetState('full');
 
-      // Both possible loading UIs (list skeleton, map spinner) are in the
-      // DOM by now, whichever one is actually visible — start the shared
-      // staged-message cycle once so it reaches whichever one applies.
       startProgressMessages(query, currentAnalysis);
 
       error.style.display = "none";
@@ -1355,28 +1420,22 @@
         // name search (forced to 90+), so index 0 is the intended place.
         if (a.wants_directions && currentResults.length > 0 && currentResults[0].latitude && currentResults[0].longitude) {
           showRouteOnMap(0, 'driving');
-        } else if (
-          a.is_brand && currentResults.length > 0 &&
-          document.getElementById('btnMap').classList.contains('active') &&
-          markers[0]
-        ) {
-          // Already looking at the map and searched a specific restaurant by
-          // name — the marker alone doesn't say "this is the one you asked
-          // for" without tapping it, so open its popup instead of leaving
-          // that as an extra step.
+        } else if (a.is_brand && currentResults.length > 0 && markers[0]) {
+          // Searched a specific restaurant by name — the map alone doesn't
+          // say "this is the one you asked for" without tapping it, so
+          // open its popup instead of leaving that as an extra step.
           markers[0].openPopup();
         }
 
         searchInput.placeholder = '↳ refine: "but cheaper" or "with outdoor seating"';
-        // Covers the one case switchView doesn't: starting a real search
-        // while already looking at browse mode's map — browseMode flips off
-        // above without any switchView call happening alongside it.
-        updateMapNavIcon();
 
       } catch (err) {
         error.textContent = err.message || "Something went wrong. Try again.";
         error.style.display = "block";
         console.error(err);
+        // Nothing left to show once the skeleton clears — a big empty
+        // floating sheet over the map would look broken, not just empty.
+        if (!resultsBox.innerHTML) document.getElementById('resultsSheet').hidden = true;
       } finally {
         isLoading = false;
         loading.style.display = "none";
@@ -1412,21 +1471,23 @@
       browseMode = false;
       singleCardIndex = null;
       activeMapIndex = null;
-      document.getElementById('btnList').style.display = '';
       searchInput.placeholder = "Describe what you're looking for...";
       analysisBox.style.display = "none";
       resultsBox.innerHTML = "";
       resultsBox.style.display = 'flex';
-      // switchView('map') leaves #mapView's own display:block set directly —
-      // hiding the toggle bar alone doesn't hide the map itself, so it was
+      // switchView() leaves #mapView's own display:block set directly —
+      // there's nothing else that would hide the map itself, so it was
       // staying visible underneath the start screen after a reset.
       document.getElementById('mapView').style.display = 'none';
-      document.getElementById('viewToggle').style.display = 'none';
-      // Back to the plain default state — list "active", not whatever view
-      // happened to be showing right before the reset (resetSearch doesn't
-      // go through switchView, so nothing else clears this).
-      document.getElementById('btnList').classList.add('active');
-      document.getElementById('btnMap').classList.remove('active');
+      // switchView() hides this to give the map more room — reset back
+      // to visible since we're leaving map view behind entirely here.
+      document.getElementById('headerDecor').style.display = '';
+      // The results sheet only makes sense once there's a real search to
+      // show — closeBottomSheet handles the single-restaurant one, this is
+      // that same idea for the multi-result one.
+      document.getElementById('resultsSheet').hidden = true;
+      closeBottomSheet();
+      clearRoute();
       error.style.display = "none";
       searchInput.focus();
       startSuggestionChips();
@@ -1565,7 +1626,15 @@
       if (!r) return;
       closeMenu();
       stopSuggestionChips();
-      browseMode = false;
+      // This is genuinely the same "one restaurant, shown via the sheet,
+      // enriched lazily" flow browsing the map uses — not a real search, so
+      // browseMode = true here, not false. That's what makePopupHtml checks
+      // to decide whether "Directions" → tap the marker again offers "View
+      // details" (opens the sheet, correct) or "View in list" (scrolls to a
+      // card in #results, which this flow never populates — that mismatch
+      // was the actual dead end: tapping "View in list" tried to scroll to
+      // a card that never existed, landing on a blank, stuck-looking panel).
+      browseMode = true;
       currentAnalysis = null;
       analysisBox.style.display = "none";
       error.style.display = "none";
@@ -1573,9 +1642,19 @@
       markers = [];
       activeMapIndex = null;
       clearRoute();
+      // Mutually exclusive with a real search's results sheet.
+      document.getElementById('resultsSheet').hidden = true;
       currentResults = [r];
-      renderSingleCard(0);
-      resultsBox.scrollIntoView({ behavior: "smooth", block: "start" });
+      // Same sheet a map deep dive gets, over the plain home screen instead
+      // of the map — no reason "peek at one restaurant" should feel like a
+      // full page navigation just because it wasn't reached from a marker.
+      // The saved snapshot's hours/phone/description are frozen from
+      // whenever this was saved (see toggleSaveRestaurant) and can be
+      // stale — _detailsLoaded would still be true from back then, which
+      // would otherwise skip the refetch below entirely.
+      r._detailsLoaded = false;
+      openBottomSheet(0);
+      loadBrowseMarkerDetails(0);
     }
 
     function renderSavedRestaurantsMenu() {
@@ -1596,51 +1675,56 @@
       }).join("");
     }
 
-    function switchView(view) {
-      const listEl = document.getElementById('results');
+    // The map is always the backdrop now, for both browse mode and a real
+    // search — there's no separate "list view" to switch away to any more
+    // (a real search's ranked matches live in the results sheet over this
+    // same map; see setResultsSheetState). This just makes sure the map
+    // itself is visible, sized to fill whatever's left of the viewport, and
+    // initialized if it hasn't been yet. Kept as a function (rather than
+    // inlining this everywhere) since every caller needs the same handful
+    // of steps in the same order.
+    function switchView() {
       const mapEl = document.getElementById('mapView');
-      const btnList = document.getElementById('btnList');
-      const btnMap = document.getElementById('btnMap');
-
-      if (view === 'list') {
-        mapEl.style.display = 'none';
-        listEl.style.display = 'flex';
-        btnList.classList.add('active');
-        btnMap.classList.remove('active');
-        if (isLoading) loading.style.display = "block";
-      } else {
-        listEl.style.display = 'none';
-        mapEl.style.display = 'block';
-        btnList.classList.remove('active');
-        btnMap.classList.add('active');
-        // 'nearest' only scrolls if the map isn't already visible, instead of
-        // always jumping it to the top of the screen — switching views
-        // shouldn't feel like the page yanked control away from you.
-        mapEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        if (isLoading) {
-          // A search can still be in flight when someone switches to Map —
-          // show its own spinner here instead of leaving the list's skeleton
-          // visible underneath (that skeleton only turns off once the search
-          // resolves, it doesn't know the active tab just changed).
-          loading.style.display = "none";
-          showMapLoadingSpinner();
-        } else {
-          setTimeout(() => {
-            map && map.invalidateSize();
-            if (markers.length === 0) initMap(currentResults);
-          }, 100);
-        }
-      }
-
-      // The top-bar map-pin button is the one and only List/Map control now
-      // (see browseNearbyOnMap, which doubles as that toggle whenever a real
-      // search is active) — this bar stays hidden permanently rather than
-      // duplicating it. btnList/btnMap's own active/inactive classes above
-      // are still real and still read elsewhere (e.g. to know which view is
-      // current) — only this container's visibility is retired.
-      document.getElementById('viewToggle').style.display = 'none';
+      mapEl.style.display = 'block';
+      // Not needed once you're actually looking at a map — hiding it frees
+      // up the space it was taking, same reasoning as the old list/map
+      // toggle's "map mode" used to have.
+      document.getElementById('headerDecor').style.display = 'none';
+      resizeMapToFill();
+      // 'nearest' only scrolls if the map isn't already visible, instead of
+      // always jumping it to the top of the screen — switching views
+      // shouldn't feel like the page yanked control away from you.
+      mapEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      setTimeout(() => {
+        resizeMapToFill();
+        map && map.invalidateSize();
+        if (markers.length === 0) initMap(currentResults);
+      }, 100);
       updateMapNavIcon();
     }
+
+    // Sizes the map to fill whatever's actually left of the viewport below
+    // it, down to the bottom nav — computed live off real element positions
+    // instead of a guessed calc(100vh - Npx) that only happened to be right
+    // for one particular layout (header shown or hidden, analysis box
+    // present or not, bottom nav on or off). Safe to call any time the map
+    // is visible; a no-op in spirit (just recomputes the same thing) when
+    // nothing's actually changed.
+    function resizeMapToFill() {
+      const mapEl = document.getElementById('mapView');
+      const top = mapEl.getBoundingClientRect().top;
+      const bottomNav = document.getElementById('bottomNav');
+      const bottomReserve = (bottomNav && bottomNav.offsetHeight) || 0;
+      const height = Math.max(320, window.innerHeight - top - bottomReserve - 10);
+      mapEl.style.height = `${height}px`;
+    }
+
+    window.addEventListener('resize', () => {
+      if (document.getElementById('mapView').style.display === 'block') {
+        resizeMapToFill();
+        map && map.invalidateSize();
+      }
+    });
 
     // That same map-pin/bottom-nav button still flips between List and Map
     // for a real scored search (multiple ranked results genuinely need a
@@ -1651,15 +1735,39 @@
     // navigation that changes which view is showing) and resetSearch (the
     // one state change that doesn't go through switchView).
     function updateMapNavIcon() {
-      const isMapActive = document.getElementById('btnMap').classList.contains('active');
       let icon = 'ti-map-2', label = 'Map';
-      if (!browseMode && isMapActive && (isLoading || currentAnalysis)) {
-        icon = 'ti-list'; label = 'List';
+      // A real search: the button names whichever state the results sheet
+      // is NOT currently in — full list showing means tapping reveals more
+      // map, so it reads "Map"; peeking means tapping expands the list, so
+      // it reads "List". Browse mode's single-restaurant sheet has no such
+      // state to represent — it's always just "Map" there (see
+      // browseNearbyOnMap, which no longer does anything else for it).
+      if (!browseMode && (isLoading || currentAnalysis)) {
+        icon = resultsSheetFull ? 'ti-map-2' : 'ti-list';
+        label = resultsSheetFull ? 'Map' : 'List';
       }
       document.querySelectorAll('.map-nav-icon').forEach(el => el.className = `ti ${icon} map-nav-icon`);
       document.querySelectorAll('.map-nav-label').forEach(el => el.textContent = label);
       const topBtn = document.getElementById('navMapTop');
       if (topBtn) topBtn.title = label === 'List' ? 'Back to list' : 'Browse nearby on the map';
+    }
+
+    // Expands/collapses the real-search results sheet between its two
+    // states — never fully closed (see resultsSheetFull), just how much of
+    // the map is visible above it. Clearing any inline height first matters
+    // once the sheet supports a drag gesture too (not yet built) — an
+    // inline height from mid-drag would otherwise override the class-driven
+    // one this sets.
+    function setResultsSheetState(state) {
+      const sheet = document.getElementById('resultsSheet');
+      resultsSheetFull = state === 'full';
+      sheet.style.height = '';
+      sheet.classList.toggle('full', resultsSheetFull);
+      updateMapNavIcon();
+    }
+
+    function toggleResultsSheetState() {
+      setResultsSheetState(resultsSheetFull ? 'peek' : 'full');
     }
 
     // Entry point for someone who'd rather just look at what's around than
@@ -1680,23 +1788,19 @@
         return;
       }
       // A real search that's loading, or already showing results, owns this
-      // button while it's active — it should just flip between that
-      // search's own List/Map view (this is the only control for that now
-      // that the pill under the search box is retired), not launch a
-      // separate "what's nearby" browse that silently replaces the search.
+      // button while it's active — it just expands/collapses that search's
+      // results sheet (see setResultsSheetState), not launch a separate
+      // "what's nearby" browse that silently replaces the search.
       // currentAnalysis is only non-null once a search has actually run —
       // resetSearch() clears it back to null for the plain start screen.
       if (isLoading || currentAnalysis) {
-        const isMapActive = document.getElementById('btnMap').classList.contains('active');
-        if (isMapActive) {
-          // Jump straight to (and highlight) the restaurant whose popup is
-          // open, same reasoning as the browse-mode case above, instead of
-          // just dropping into the top of the full list.
-          if (activeMapIndex !== null) focusOnList(activeMapIndex);
-          else switchView('list');
-        } else {
-          switchView('map');
-        }
+        // Jump straight to (and highlight) the restaurant whose popup is
+        // open, same reasoning as the browse-mode case above, instead of
+        // just expanding to the top of the full list — but only when
+        // expanding; collapsing from a highlighted card should still just
+        // collapse, not re-highlight it.
+        if (!resultsSheetFull && activeMapIndex !== null) focusOnList(activeMapIndex);
+        else toggleResultsSheetState();
         return;
       }
       const got = await ensureLocation();
@@ -1719,8 +1823,11 @@
       markers.forEach(m => m.remove());
       markers = [];
       clearRoute();
+      // The results sheet is a real-search-only thing — browse mode uses
+      // the single-restaurant sheet instead (see openBottomSheet).
+      document.getElementById('resultsSheet').hidden = true;
 
-      switchView('map');
+      switchView();
 
       try {
         const res = await fetch(`/nearby?lat=${userLatitude}&lng=${userLongitude}`);
@@ -1855,7 +1962,11 @@
           icon: browseMode ? makePlainPin() : makeNumberedPin(index + 1)
         })
           .addTo(map)
-          .bindTooltip(r.name, { permanent: true, direction: 'top', offset: [0, -16], className: 'marker-label', interactive: false })
+          // interactive:true so the name label is its own tap target, not
+          // just the pin — the label sits well above the actual marker icon
+          // (offset [0,-16]) and is often the bigger, easier-to-hit target
+          // of the two, especially once several pins are close together.
+          .bindTooltip(r.name, { permanent: true, direction: 'top', offset: [0, -16], className: 'marker-label', interactive: true })
           .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' })
           // Opening a different restaurant's popup while a route from an
           // earlier click is still on the map leaves a stray distance/time
@@ -1879,6 +1990,12 @@
             if (activeMapIndex === index) activeMapIndex = null;
             updateMapNavIcon();
           });
+        // Being interactive doesn't make the tooltip forward clicks to the
+        // marker's own popup on its own — Leaflet only makes the tooltip
+        // element itself clickable, so this is what actually wires "tap the
+        // name" to the same result as "tap the pin".
+        const tooltipEl = marker.getTooltip()?.getElement();
+        if (tooltipEl) tooltipEl.addEventListener('click', () => marker.openPopup());
         // Indexed, not pushed — a restaurant with no coordinates gets skipped
         // above without advancing this array, so push() would silently drift
         // every later marker's position out of sync with currentResults[index]
@@ -1889,7 +2006,7 @@
     }
 
     function focusOnList(index) {
-      switchView('list');
+      setResultsSheetState('full');
       setTimeout(() => {
         document.querySelectorAll('.card.highlighted')
           .forEach(c => c.classList.remove('highlighted'));
@@ -1905,7 +2022,10 @@
       const r = currentResults[index];
       if (!r || !r.latitude || !r.longitude) return;
 
-      switchView('map');
+      // Map's already visible the whole time a real search is active —
+      // "showing" it here just means collapsing the results sheet enough
+      // to actually see it.
+      setResultsSheetState('peek');
 
       setTimeout(() => {
         map.invalidateSize();
@@ -1954,9 +2074,26 @@
       if (!r || !r.latitude || !r.longitude) return;
       if (userLatitude == null || userLongitude == null) return;
 
+      // A route drawn on the map means nothing if a sheet is still covering
+      // most of it — this is what "Directions doesn't work" from inside the
+      // single-restaurant sheet actually was: the route WAS drawing, just
+      // entirely hidden behind still-open sheet content. Both calls are
+      // harmless no-ops in whichever context doesn't apply (browse mode's
+      // sheet vs. a real search's results sheet are mutually exclusive).
+      closeBottomSheet();
+      setResultsSheetState('peek');
+
       routeTargetIndex = index;
       if (mode) routeMode = mode;
-      switchView('map');
+      switchView();
+
+      // Up immediately, before the route itself has even started
+      // calculating — the whole point is an exit/mode-switch that doesn't
+      // depend on anything else being open first.
+      document.getElementById('routePanelName').textContent = r.name;
+      document.getElementById('routePanelMeta').textContent = 'Calculating route…';
+      document.getElementById('routePanel').hidden = false;
+      updateRouteModeButtons();
 
       setTimeout(() => {
         map.invalidateSize();
@@ -1977,6 +2114,22 @@
       }, 250);
     }
 
+    // Wired to the route panel's own mode buttons — a thin wrapper so those
+    // onclick attributes don't need to reference routeTargetIndex directly
+    // (a plain top-level `let`, not something inline HTML attributes should
+    // reach into) and so switching mode mid-route is just "run the same
+    // routing flow again with the same target, different mode."
+    function setRouteMode(mode) {
+      if (routeTargetIndex !== null) showRouteOnMap(routeTargetIndex, mode);
+    }
+
+    function updateRouteModeButtons() {
+      ['driving', 'cycling', 'walking'].forEach(m => {
+        const btn = document.getElementById(`routeModeBtn-${m}`);
+        if (btn) btn.classList.toggle('active', m === routeMode);
+      });
+    }
+
     function drawRoute() {
       const r = currentResults[routeTargetIndex];
       if (!r || !map) return;
@@ -1988,14 +2141,21 @@
       routingRouters[routeMode].route(
         [L.Routing.waypoint(L.latLng(userLatitude, userLongitude)), L.Routing.waypoint(L.latLng(r.latitude, r.longitude))],
         (err, routes) => {
-          if (err || !routes || !routes.length) return;
+          if (err || !routes || !routes.length) {
+            document.getElementById('routePanelMeta').textContent = "Couldn't find a route";
+            return;
+          }
           if (routeLine) map.removeLayer(routeLine);
           const distKm = routes[0].summary.totalDistance / 1000;
           const label = `${formatDistance(distKm)} · ${formatDuration(routes[0].summary.totalTime)}`;
-          routeLine = L.polyline(routes[0].coordinates, { color: '#8B3A1F', weight: 4, opacity: 0.8 })
-            .bindTooltip(label, { permanent: true, direction: 'top', className: 'route-tooltip' })
-            .addTo(map);
+          // Used to carry its own floating "0.5 km · 1 min" tooltip too —
+          // now that the route panel shows the same line more prominently
+          // right below it, that was just the same text twice, competing
+          // for attention instead of the panel reading as the one clear
+          // place to look.
+          routeLine = L.polyline(routes[0].coordinates, { color: '#8B3A1F', weight: 4, opacity: 0.8 }).addTo(map);
           map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
+          document.getElementById('routePanelMeta').textContent = label;
         }
       );
     }
@@ -2003,6 +2163,7 @@
     function clearRoute() {
       if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
       routeTargetIndex = null;
+      document.getElementById('routePanel').hidden = true;
       // Bring back whichever markers showRouteOnMap hid to isolate the
       // route — they were only removed from the map layer, never destroyed.
       if (map) markers.forEach(m => { if (m && !map.hasLayer(m)) m.addTo(map); });
@@ -2032,7 +2193,7 @@
             icon: browseMode ? makePlainPin() : makeNumberedPin(index + 1)
           })
             .addTo(map)
-            .bindTooltip(r.name, { permanent: true, direction: 'top', offset: [0, -16], className: 'marker-label', interactive: false })
+            .bindTooltip(r.name, { permanent: true, direction: 'top', offset: [0, -16], className: 'marker-label', interactive: true })
             .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' })
             .on('popupopen', () => {
               if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute();
@@ -2046,6 +2207,8 @@
               if (activeMapIndex === index) activeMapIndex = null;
               updateMapNavIcon();
             });
+          const tooltipEl = marker.getTooltip()?.getElement();
+          if (tooltipEl) tooltipEl.addEventListener('click', () => marker.openPopup());
           markers[index] = marker;
         });
         updateMarkerLabelVisibility();
@@ -2357,8 +2520,41 @@
     }
 
     function runSuggestion(btnEl) {
+      // A photo/showcase chip (see renderChip) already names one specific
+      // real restaurant — running that name back through a full /search
+      // (classify → Places lookup → Sonnet scoring, just to land on the one
+      // place we already knew) was slower and heavier than the plain-text
+      // chips below it needed to be, and it opened the full scored-list
+      // screen for what's really just "here's this one pick." Look it up
+      // and open it directly instead, same as a saved restaurant or a map
+      // marker; only a genuine open-ended text chip still runs a real search.
+      if (btnEl.dataset.label) {
+        const item = showcaseItems.find(i => i.name === btnEl.dataset.key);
+        if (item) { viewShowcaseRestaurant(item); return; }
+      }
       searchInput.value = btnEl.dataset.query || btnEl.textContent.trim();
       search();
+    }
+
+    function viewShowcaseRestaurant(item) {
+      stopSuggestionChips();
+      // See the identical comment in viewSavedRestaurant — same "single
+      // restaurant via the sheet" flow, so this needs browseMode = true for
+      // the same reason: makePopupHtml's "View details" vs "View in list"
+      // branch depends on it, and this flow never populates #results.
+      browseMode = true;
+      currentAnalysis = null;
+      analysisBox.style.display = "none";
+      error.style.display = "none";
+      markers.forEach(m => m.remove());
+      markers = [];
+      activeMapIndex = null;
+      clearRoute();
+      // Mutually exclusive with a real search's results sheet.
+      document.getElementById('resultsSheet').hidden = true;
+      currentResults = [{ ...item }];
+      openBottomSheet(0);
+      loadBrowseMarkerDetails(0);
     }
 
     const saved = localStorage.getItem("theme");
