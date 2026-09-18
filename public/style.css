@@ -2013,3 +2013,54 @@ body.dark .card-tag.open-now {
         height: 34px;
     }
 }
+
+/* ── Bottom nav (comparison alternative to the top-bar hamburger/map-pin) ── */
+/* Room for the fixed bar below so it never covers the last card/action —
+   placed here, after the responsive .container rules above, so this
+   longhand wins the cascade at every breakpoint without needing !important. */
+.container {
+    padding-bottom: 84px;
+}
+
+.bottom-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 12;
+    display: flex;
+    justify-content: space-around;
+    background: var(--paper-2);
+    border-top: 0.5px solid var(--border);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+}
+
+.bottom-nav-btn {
+    flex: 1;
+    max-width: 96px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 4px;
+    color: var(--ink-3);
+    font-family: var(--sans);
+    transition: color 0.2s;
+}
+
+.bottom-nav-btn i {
+    font-size: 20px;
+}
+
+.bottom-nav-btn span {
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.bottom-nav-btn:hover,
+.bottom-nav-btn:active {
+    color: var(--ember);
+}

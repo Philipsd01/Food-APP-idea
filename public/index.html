@@ -73,7 +73,7 @@
       </div>
     </div>
 
-    <div class="menu-section">
+    <div class="menu-section" id="savedSection">
       <div class="menu-section-label" onclick="toggleSection(this)">
         <i class="ti ti-heart"></i>
         <span>Saved Restaurants</span>
@@ -130,8 +130,8 @@
       <button class="hamburger" onclick="openMenu()">
         <i class="ti ti-menu-2"></i>
       </button>
-      <button class="hamburger" onclick="browseNearbyOnMap()" title="Browse nearby on the map">
-        <i class="ti ti-map-2"></i>
+      <button class="hamburger" id="navMapTop" onclick="browseNearbyOnMap()" title="Browse nearby on the map">
+        <i class="ti ti-map-2 map-nav-icon"></i>
       </button>
     </div>
 
@@ -193,6 +193,29 @@
   </div>
   </div>
 
+  <!-- Comparison alternative to the top-bar hamburger + map-pin — same four
+       destinations (Home, Map, Saved, Menu), just laid out as a bottom tab
+       bar instead. Nothing above was removed so the two can be judged side
+       by side; see bottomNav's CSS to hide one or the other. -->
+  <div class="bottom-nav" id="bottomNav">
+    <button class="bottom-nav-btn" id="navHome" onclick="resetSearch()" title="Home">
+      <i class="ti ti-home"></i>
+      <span>Home</span>
+    </button>
+    <button class="bottom-nav-btn" id="navMap" onclick="browseNearbyOnMap()" title="Map">
+      <i class="ti ti-map-2 map-nav-icon"></i>
+      <span class="map-nav-label">Map</span>
+    </button>
+    <button class="bottom-nav-btn" id="navSaved" onclick="openSavedSection()" title="Saved">
+      <i class="ti ti-heart"></i>
+      <span>Saved</span>
+    </button>
+    <button class="bottom-nav-btn" id="navMenu" onclick="openMenu()" title="Menu">
+      <i class="ti ti-menu-2"></i>
+      <span>Menu</span>
+    </button>
+  </div>
+
   <div class="lightbox" id="lightbox" onclick="if (event.target === this) closeLightbox()">
     <button class="lightbox-close" onclick="closeLightbox()" title="Close"><i class="ti ti-x"></i></button>
     <button class="lightbox-nav lightbox-prev" onclick="event.stopPropagation(); lightboxStep(-1)" title="Previous"><i class="ti ti-chevron-left"></i></button>
@@ -229,6 +252,11 @@
     // instead of a real scored search — those results have no score/tags/
     // summary, so map popups and the list toggle adapt accordingly.
     let browseMode = false;
+    // Index of whichever marker's popup is currently open on the map, if
+    // any — lets the bottom-nav/top-bar List toggle jump straight to the
+    // restaurant someone is actually looking at right now, instead of
+    // falling back to whatever was last deep-dived (or nothing).
+    let activeMapIndex = null;
 
     // Every restaurant name, review, and AI-generated description ultimately
     // traces back to Google (business names, customer reviews) or a user's
@@ -1147,6 +1175,7 @@
       // takes over resultsBox instead of getting overwritten mid-render.
       browseMode = false;
       singleCardIndex = null;
+      activeMapIndex = null;
       document.getElementById('btnList').style.display = '';
 
       // Only the immediately preceding message is needed here — analyzeQuery
@@ -1248,6 +1277,10 @@
         }
 
         searchInput.placeholder = '↳ refine: "but cheaper" or "with outdoor seating"';
+        // Covers the one case switchView doesn't: starting a real search
+        // while already looking at browse mode's map — browseMode flips off
+        // above without any switchView call happening alongside it.
+        updateMapNavIcon();
 
       } catch (err) {
         error.textContent = err.message || "Something went wrong. Try again.";
@@ -1270,11 +1303,24 @@
       document.getElementById("menuOverlay").classList.remove("open");
     }
 
+    // Bottom-nav "Saved" shortcut — opens straight into the Saved
+    // Restaurants section instead of dropping someone into a collapsed
+    // menu they then have to know to expand themselves.
+    function openSavedSection() {
+      openMenu();
+      const section = document.getElementById("savedSection");
+      if (section) {
+        section.classList.add("open");
+        section.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+
     function resetSearch() {
       currentAnalysis = null;
       lastQuery = "";
       browseMode = false;
       singleCardIndex = null;
+      activeMapIndex = null;
       document.getElementById('btnList').style.display = '';
       searchInput.placeholder = "Describe what you're looking for...";
       analysisBox.style.display = "none";
@@ -1285,9 +1331,15 @@
       // staying visible underneath the start screen after a reset.
       document.getElementById('mapView').style.display = 'none';
       document.getElementById('viewToggle').style.display = 'none';
+      // Back to the plain default state — list "active", not whatever view
+      // happened to be showing right before the reset (resetSearch doesn't
+      // go through switchView, so nothing else clears this).
+      document.getElementById('btnList').classList.add('active');
+      document.getElementById('btnMap').classList.remove('active');
       error.style.display = "none";
       searchInput.focus();
       startSuggestionChips();
+      updateMapNavIcon();
     }
 
     function toggleSection(label) {
@@ -1412,6 +1464,29 @@
       if (currentResults.length > 0) renderResults(currentResults);
     }
 
+    // Tapping a saved restaurant used to jump straight out to Google Maps
+    // directions — now it shows the same card a real search result gets
+    // (photos, reviews, ask box, and yes, still a Directions button from
+    // there), since the full result object is already sitting in
+    // localStorage from when it was saved (see toggleSaveRestaurant).
+    function viewSavedRestaurant(name) {
+      const r = loadSavedRestaurants().find(s => s.name === name);
+      if (!r) return;
+      closeMenu();
+      stopSuggestionChips();
+      browseMode = false;
+      currentAnalysis = null;
+      analysisBox.style.display = "none";
+      error.style.display = "none";
+      markers.forEach(m => m.remove());
+      markers = [];
+      activeMapIndex = null;
+      clearRoute();
+      currentResults = [r];
+      renderSingleCard(0);
+      resultsBox.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
     function renderSavedRestaurantsMenu() {
       const container = document.getElementById("savedRestaurantsList");
       if (!container) return;
@@ -1422,10 +1497,9 @@
       }
       container.innerHTML = saved.map(r => {
         const escapedName = escapeHtml(r.name.replace(/'/g, "\\'"));
-        const hasCoords = r.latitude && r.longitude;
         return `
         <div class="menu-item saved-restaurant-item">
-          <span class="saved-restaurant-name" ${hasCoords ? `onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}', '_blank')"` : ''}>${escapeHtml(r.name)}</span>
+          <span class="saved-restaurant-name" onclick="viewSavedRestaurant('${escapedName}')">${escapeHtml(r.name)}</span>
           <i class="ti ti-x" onclick="event.stopPropagation(); unsaveRestaurant('${escapedName}')"></i>
         </div>`;
       }).join("");
@@ -1474,6 +1548,31 @@
       // are still real and still read elsewhere (e.g. to know which view is
       // current) — only this container's visibility is retired.
       document.getElementById('viewToggle').style.display = 'none';
+      updateMapNavIcon();
+    }
+
+    // That same map-pin/bottom-nav button flips between the map and a
+    // restaurant's card depending on context (browseNearbyOnMap) — a frozen
+    // "Map" icon regardless was misleading about which one a tap would
+    // actually do. This keeps the icon/label naming the real destination
+    // instead. It never shows anything but Map/List — exiting browse mode
+    // entirely is Home's job alone now (see browseNearbyOnMap), so there's
+    // no third state to represent here. Called from switchView (covers
+    // every navigation that changes which view is showing), resetSearch
+    // (the one state change that doesn't go through switchView), and the
+    // marker popupopen/popupclose handlers (activeMapIndex changing doesn't
+    // change which view is showing, just what a List tap would do next).
+    function updateMapNavIcon() {
+      const isMapActive = document.getElementById('btnMap').classList.contains('active');
+      const hasTarget = activeMapIndex !== null || singleCardIndex !== null;
+      let icon = 'ti-map-2', label = 'Map';
+      if (isMapActive && ((browseMode && hasTarget) || (!browseMode && (isLoading || currentAnalysis)))) {
+        icon = 'ti-list'; label = 'List';
+      }
+      document.querySelectorAll('.map-nav-icon').forEach(el => el.className = `ti ${icon} map-nav-icon`);
+      document.querySelectorAll('.map-nav-label').forEach(el => el.textContent = label);
+      const topBtn = document.getElementById('navMapTop');
+      if (topBtn) topBtn.title = label === 'List' ? 'Back to list' : 'Browse nearby on the map';
     }
 
     // Entry point for someone who'd rather just look at what's around than
@@ -1483,19 +1582,27 @@
     // query afterwards still works as normal — search() clears browseMode
     // and takes back over.
     async function browseNearbyOnMap() {
-      // Acts as a toggle. From the nearby-markers map itself (browse mode's
-      // "top level"), tapping again exits back to the start screen. From a
-      // "View in list" deep dive on one restaurant, it steps back up to that
-      // map instead of exiting all the way out — same one button, but it
-      // goes exactly one level up rather than always all the way to zero.
+      // A real two-state toggle within browse mode: the nearby-markers map
+      // ("top level") and the last single-restaurant deep dive someone
+      // tapped into, back and forth, remembering singleCardIndex across the
+      // trip instead of discarding it — Home (see resetSearch, now its own
+      // dedicated bottom-nav/menu action) is what actually exits browse mode
+      // now, so this button no longer needs to double as an exit on a second
+      // Exiting browse mode entirely is Home's job now (bottom-nav/menu) —
+      // this button never does that itself anymore, it's a plain two-way
+      // toggle. Stepping down prefers whichever marker's popup is actually
+      // open right now (activeMapIndex) over the last restaurant deep-dived
+      // into (singleCardIndex), so tapping List always lands on the place
+      // someone is currently looking at, not a stale earlier one. If
+      // neither exists yet (top-level map, nothing tapped), this is a no-op.
       if (browseMode) {
         const isMapActive = document.getElementById('btnMap').classList.contains('active');
         if (!isMapActive) {
-          singleCardIndex = null;
           switchView('map');
-          return;
+        } else {
+          const target = activeMapIndex !== null ? activeMapIndex : singleCardIndex;
+          if (target !== null) deepDiveRestaurant(target);
         }
-        resetSearch();
         return;
       }
       // A real search that's loading, or already showing results, owns this
@@ -1507,7 +1614,15 @@
       // resetSearch() clears it back to null for the plain start screen.
       if (isLoading || currentAnalysis) {
         const isMapActive = document.getElementById('btnMap').classList.contains('active');
-        switchView(isMapActive ? 'list' : 'map');
+        if (isMapActive) {
+          // Jump straight to (and highlight) the restaurant whose popup is
+          // open, same reasoning as the browse-mode case above, instead of
+          // just dropping into the top of the full list.
+          if (activeMapIndex !== null) focusOnList(activeMapIndex);
+          else switchView('list');
+        } else {
+          switchView('map');
+        }
         return;
       }
       const got = await ensureLocation();
@@ -1525,6 +1640,8 @@
       currentAnalysis = null;
       currentResults = [];
       browseMode = true;
+      singleCardIndex = null;
+      activeMapIndex = null;
       markers.forEach(m => m.remove());
       markers = [];
       clearRoute();
@@ -1677,11 +1794,17 @@
             // from behind the popup) once the popup showing that same name
             // is open — hide it for the duration, restore it on close.
             marker.closeTooltip();
+            activeMapIndex = index;
+            updateMapNavIcon();
           })
           // Only reopen it if the zoom level actually has room for it — a
           // popup closing while zoomed out shouldn't bring back a label
           // that's just going to overlap its neighbors again.
-          .on('popupclose', () => { if (shouldShowLabels()) marker.openTooltip(); });
+          .on('popupclose', () => {
+            if (shouldShowLabels()) marker.openTooltip();
+            if (activeMapIndex === index) activeMapIndex = null;
+            updateMapNavIcon();
+          });
         // Indexed, not pushed — a restaurant with no coordinates gets skipped
         // above without advancing this array, so push() would silently drift
         // every later marker's position out of sync with currentResults[index]
@@ -1826,6 +1949,9 @@
 
         markers.forEach(m => m.remove());
         markers = [];
+        // The rebuild below destroys whatever popup was open along with its
+        // marker, with no popupclose event to catch it and clear this.
+        activeMapIndex = null;
         currentResults.forEach((r, index) => {
           if (!r.latitude || !r.longitude) return;
           const marker = L.marker([r.latitude, r.longitude], {
@@ -1838,11 +1964,18 @@
               if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute();
               if (browseMode) loadBrowseMarkerDetails(index);
               marker.closeTooltip();
+              activeMapIndex = index;
+              updateMapNavIcon();
             })
-            .on('popupclose', () => { if (shouldShowLabels()) marker.openTooltip(); });
+            .on('popupclose', () => {
+              if (shouldShowLabels()) marker.openTooltip();
+              if (activeMapIndex === index) activeMapIndex = null;
+              updateMapNavIcon();
+            });
           markers[index] = marker;
         });
         updateMarkerLabelVisibility();
+        updateMapNavIcon();
       }
     }
 
@@ -2126,10 +2259,8 @@
         <p class="chips-label">Your saved spots</p>
         <div class="saved-row">
           ${saved.slice(0, 8).map(r => {
-            const hasCoords = r.latitude && r.longitude;
-            const clickAttr = hasCoords
-              ? `onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}', '_blank')"`
-              : "";
+            const escapedName = escapeHtml(r.name.replace(/'/g, "\\'"));
+            const clickAttr = `onclick="viewSavedRestaurant('${escapedName}')"`;
             // Same quality bar as the carousel (a real photo card) but
             // deliberately flat and static — no perspective, no rotation,
             // no "in focus" glow — so it reads as a plain scrollable list,
@@ -2140,7 +2271,6 @@
             const photoHtml = r.photo_reference
               ? `<img class="saved-chip-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()">`
               : "";
-            const escapedName = escapeHtml(r.name.replace(/'/g, "\\'"));
             return `<div class="saved-chip" ${clickAttr}>
               <div class="saved-chip-photo-wrap">
                 ${photoHtml}
