@@ -193,6 +193,22 @@
   </div>
   </div>
 
+  <!-- Prototype (see updateMapNavIcon/deepDiveRestaurant comments): a
+       browse-mode restaurant deep dive now slides up as a sheet over the
+       still-visible map, Google Maps/Airbnb-style, instead of navigating
+       away to a separate list screen — so there's no List/Map toggle
+       button involved in viewing one place at all. -->
+  <div class="sheet-backdrop" id="sheetBackdrop" onclick="closeBottomSheet()"></div>
+  <div class="bottom-sheet" id="bottomSheet">
+    <div class="sheet-handle-row" id="sheetHandleRow">
+      <div class="sheet-handle"></div>
+      <button class="sheet-close-btn" onclick="closeBottomSheet()" title="Close">
+        <i class="ti ti-x"></i>
+      </button>
+    </div>
+    <div class="sheet-content" id="sheetContent"></div>
+  </div>
+
   <!-- Comparison alternative to the top-bar hamburger + map-pin — same four
        destinations (Home, Map, Saved, Menu), just laid out as a bottom tab
        bar instead. Nothing above was removed so the two can be judged side
@@ -584,7 +600,7 @@
           ${hoursLine}
           ${descriptionBlock}
           <div class="map-popup-footer">
-            <button class="map-popup-list-btn" onclick="${browseMode ? `deepDiveRestaurant(${index})` : `focusOnList(${index})`}">View in list</button>
+            <button class="map-popup-list-btn" onclick="${browseMode ? `deepDiveRestaurant(${index})` : `focusOnList(${index})`}">${browseMode ? 'View details' : 'View in list'}</button>
             <div class="map-popup-route-btns">
               ${r.phone ? `<a class="map-popup-route-btn" href="tel:${escapeHtml(r.phone)}" title="Call"><i class="ti ti-phone"></i></a>` : ''}
               ${r.website && isSafeUrl(r.website) ? `<a class="map-popup-route-btn" href="${escapeHtml(r.website)}" target="_blank" rel="noopener" title="Website"><i class="ti ti-world"></i></a>` : ''}
@@ -617,7 +633,10 @@
       const r = currentResults[index];
       const marker = markers[index];
       if (marker && marker.isPopupOpen()) marker.setPopupContent(makePopupHtml(r, index));
-      if (singleCardIndex === index) resultsBox.innerHTML = buildCardHtml(r, index);
+      if (singleCardIndex === index) {
+        const sheetContent = document.getElementById('sheetContent');
+        if (sheetContent) sheetContent.innerHTML = buildCardHtml(r, index);
+      }
     }
 
     // Fires once, the first time a browse-mode marker's popup opens or its
@@ -674,16 +693,88 @@
       refreshBrowseResultDisplay(index);
     }
 
-    // "View in list" from a browse-mode marker's popup — a deep dive into
+    // "View details" from a browse-mode marker's popup — a deep dive into
     // the one restaurant someone actually tapped, with the same photo
     // gallery/reviews/ask-box a real search's card has, not a list of every
     // nearby result (see the conversation this came out of: only the one
     // place someone taps should ever cost a Place Details + description
-    // call, not all of them).
+    // call, not all of them). Opens as a sheet over the still-visible map
+    // (see openBottomSheet) rather than navigating to a separate list
+    // screen — there's nothing to toggle back from, closing the sheet just
+    // reveals the map that was there the whole time.
     function deepDiveRestaurant(index) {
-      renderSingleCard(index);
+      openBottomSheet(index);
       loadBrowseMarkerDetails(index);
     }
+
+    // Slides the restaurant card up over the map (Google Maps/Airbnb-style)
+    // instead of swapping the whole screen to a list view. The map stays
+    // mounted and interactive underneath — nothing about it changes, so
+    // there's no separate state for a Map/List button to lose track of.
+    function openBottomSheet(index) {
+      const r = currentResults[index];
+      if (!r) return;
+      singleCardIndex = index;
+      document.getElementById('sheetContent').innerHTML = buildCardHtml(r, index);
+      document.getElementById('bottomSheet').classList.add('open');
+      document.getElementById('sheetBackdrop').classList.add('open');
+      const marker = markers[index];
+      if (marker && marker.isPopupOpen()) marker.closePopup();
+      // Nudges the marker into the strip of map that stays visible above
+      // the sheet, same idea as focusOnMap's popup-height nudge but for a
+      // much taller panel — approximate, worth eyeballing/tuning visually
+      // rather than treating this offset as exact.
+      if (map && r.latitude && r.longitude) {
+        setTimeout(() => {
+          map.invalidateSize();
+          map.setView([r.latitude, r.longitude], map.getZoom() < 15 ? 16 : map.getZoom(), { animate: true });
+          const sheetHeight = document.getElementById('bottomSheet').offsetHeight;
+          map.panBy([0, sheetHeight / 2], { animate: true });
+        }, 320);
+      }
+    }
+
+    function closeBottomSheet() {
+      document.getElementById('bottomSheet').classList.remove('open');
+      document.getElementById('sheetBackdrop').classList.remove('open');
+      document.getElementById('bottomSheet').style.transform = '';
+      singleCardIndex = null;
+    }
+
+    // Swipe-down-to-dismiss on the handle — the close button alone works,
+    // but a draggable handle is what actually sells the "this is a physical
+    // sheet sitting over the map" feel the whole prototype is testing.
+    // Pointer events cover touch and mouse alike, one listener set for both.
+    (function setupSheetDrag() {
+      const sheet = document.getElementById('bottomSheet');
+      const handle = document.getElementById('sheetHandleRow');
+      let startY = 0, dragY = 0, dragging = false;
+
+      handle.addEventListener('pointerdown', (e) => {
+        dragging = true;
+        startY = e.clientY;
+        dragY = 0;
+        sheet.style.transition = 'none';
+        handle.setPointerCapture(e.pointerId);
+      });
+      handle.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        dragY = Math.max(0, e.clientY - startY);
+        sheet.style.transform = `translateY(${dragY}px)`;
+      });
+      const endDrag = () => {
+        if (!dragging) return;
+        dragging = false;
+        sheet.style.transition = '';
+        // Past a quarter of the sheet's own height, treat it as a real
+        // dismiss gesture rather than a small nudge — otherwise snap back
+        // open instead of leaving it stuck half-dragged.
+        if (dragY > sheet.offsetHeight * 0.25) closeBottomSheet();
+        else sheet.style.transform = '';
+      };
+      handle.addEventListener('pointerup', endDrag);
+      handle.addEventListener('pointercancel', endDrag);
+    })();
 
     const TAG_FIELDS = [
       { field: "cuisine", cls: "cuisine" },
@@ -1551,22 +1642,18 @@
       updateMapNavIcon();
     }
 
-    // That same map-pin/bottom-nav button flips between the map and a
-    // restaurant's card depending on context (browseNearbyOnMap) — a frozen
-    // "Map" icon regardless was misleading about which one a tap would
-    // actually do. This keeps the icon/label naming the real destination
-    // instead. It never shows anything but Map/List — exiting browse mode
-    // entirely is Home's job alone now (see browseNearbyOnMap), so there's
-    // no third state to represent here. Called from switchView (covers
-    // every navigation that changes which view is showing), resetSearch
-    // (the one state change that doesn't go through switchView), and the
-    // marker popupopen/popupclose handlers (activeMapIndex changing doesn't
-    // change which view is showing, just what a List tap would do next).
+    // That same map-pin/bottom-nav button still flips between List and Map
+    // for a real scored search (multiple ranked results genuinely need a
+    // full separate list view) — but browse mode no longer has any List
+    // state to represent at all, now that a restaurant deep dive is a sheet
+    // over the map instead of a navigated-to screen (see openBottomSheet),
+    // so it's just always "Map" there. Called from switchView (covers every
+    // navigation that changes which view is showing) and resetSearch (the
+    // one state change that doesn't go through switchView).
     function updateMapNavIcon() {
       const isMapActive = document.getElementById('btnMap').classList.contains('active');
-      const hasTarget = activeMapIndex !== null || singleCardIndex !== null;
       let icon = 'ti-map-2', label = 'Map';
-      if (isMapActive && ((browseMode && hasTarget) || (!browseMode && (isLoading || currentAnalysis)))) {
+      if (!browseMode && isMapActive && (isLoading || currentAnalysis)) {
         icon = 'ti-list'; label = 'List';
       }
       document.querySelectorAll('.map-nav-icon').forEach(el => el.className = `ti ${icon} map-nav-icon`);
@@ -1582,27 +1669,14 @@
     // query afterwards still works as normal — search() clears browseMode
     // and takes back over.
     async function browseNearbyOnMap() {
-      // A real two-state toggle within browse mode: the nearby-markers map
-      // ("top level") and the last single-restaurant deep dive someone
-      // tapped into, back and forth, remembering singleCardIndex across the
-      // trip instead of discarding it — Home (see resetSearch, now its own
-      // dedicated bottom-nav/menu action) is what actually exits browse mode
-      // now, so this button no longer needs to double as an exit on a second
-      // Exiting browse mode entirely is Home's job now (bottom-nav/menu) —
-      // this button never does that itself anymore, it's a plain two-way
-      // toggle. Stepping down prefers whichever marker's popup is actually
-      // open right now (activeMapIndex) over the last restaurant deep-dived
-      // into (singleCardIndex), so tapping List always lands on the place
-      // someone is currently looking at, not a stale earlier one. If
-      // neither exists yet (top-level map, nothing tapped), this is a no-op.
+      // Browse mode never leaves the map now — a restaurant deep dive is a
+      // sheet layered on top of it (see openBottomSheet), not a separate
+      // view — so this button has nothing left to toggle to in that mode.
+      // Its only job here is dismissing an open sheet, which is exactly
+      // what tapping the map itself effectively means. Exiting browse mode
+      // entirely is Home's job (bottom-nav/menu), not this button's.
       if (browseMode) {
-        const isMapActive = document.getElementById('btnMap').classList.contains('active');
-        if (!isMapActive) {
-          switchView('map');
-        } else {
-          const target = activeMapIndex !== null ? activeMapIndex : singleCardIndex;
-          if (target !== null) deepDiveRestaurant(target);
-        }
+        closeBottomSheet();
         return;
       }
       // A real search that's loading, or already showing results, owns this
