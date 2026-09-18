@@ -818,64 +818,6 @@ body.dark .top-bar {
     color: var(--ember);
 }
 
-/* Browse mode's real-review fallback (see buildCardHtml/toggleReviewQuotes)
-   — collapsed behind its own tap rather than always shown, since the sheet
-   it lives in is already forceExpanded and three full review quotes are
-   real added height on top of that. */
-.review-toggle-btn {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    background: var(--paper-2);
-    border: 0.5px solid var(--border);
-    border-radius: 8px;
-    padding: 9px 12px;
-    margin-top: 8px;
-    font-family: var(--sans);
-    font-size: 12px;
-    color: var(--ink-2);
-    cursor: pointer;
-}
-
-.review-toggle-arrow {
-    font-size: 13px;
-    color: var(--ink-3);
-    transition: transform 0.25s ease;
-}
-
-.review-toggle-arrow.flipped {
-    transform: rotate(180deg);
-}
-
-.review-quotes {
-    max-height: 0;
-    overflow: hidden;
-    opacity: 0;
-    transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
-    padding-top: 0;
-}
-
-.review-quotes.open {
-    /* Was 400px, tall enough to unfold all three reviews at once — reads
-       as a wall of text suddenly taking over the sheet rather than a small
-       reveal. This shows enough to confirm something opened (about one
-       review) and scrolls internally for the rest, instead of pushing
-       everything below it further down the page. */
-    max-height: 130px;
-    overflow-y: auto;
-    opacity: 1;
-    padding-top: 10px;
-}
-
-.review-quotes p {
-    font-size: 11px;
-    color: var(--ink-3);
-    margin-bottom: 5px;
-    line-height: 1.5;
-    font-style: italic;
-}
-
 /* Ask about this restaurant — collapses/expands with the rest of the
    card's extra content, same as .evidence above. */
 .ask-box {
@@ -895,7 +837,9 @@ body.dark .top-bar {
        reason this needs to stay this tight. */
     max-height: 600px;
     opacity: 1;
-    padding-top: 10px;
+    /* Was 10px — the review toggle, ask box, and action buttons read as one
+       clamped-together block at that spacing. */
+    padding-top: 18px;
 }
 
 .ask-row {
@@ -1575,7 +1519,9 @@ body.dark .leaflet-popup-content strong {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    margin-top: 6px;
+    /* Was 6px — same "everything clamped together" spacing issue as the
+       ask box above it. */
+    margin-top: 14px;
 }
 
 .card-actions {
@@ -2069,9 +2015,11 @@ body.dark .card-tag.open-now {
     z-index: 1551;
     max-width: 480px;
     margin: 0 auto;
-    /* More room per the "feels cramped" feedback — still capped well short
-       of the full screen so the map stays visibly present above it. */
-    max-height: 85vh;
+    /* Was 85vh — started too close to the very top of the screen, barely
+       any map visible above it. The content (photo through action buttons)
+       comfortably fits shorter than this anyway, via .sheet-content's own
+       scroll if it ever doesn't. */
+    max-height: 76vh;
     display: flex;
     flex-direction: column;
     background: var(--paper);

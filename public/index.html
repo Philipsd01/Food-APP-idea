@@ -985,29 +985,22 @@
         cardTagsHtml += `<span class="card-tag closed-now">Closed</span>`;
       }
 
+      // Browse mode never has AI-scoring evidence (r.evidence) — that's
+      // Sonnet's "why this matched your search" output, specific to a real
+      // query. Real customer review excerpts (up to 3, out of the 5 Google
+      // ever gives us) fill the same visual slot instead — same plain,
+      // always-shown treatment either way rather than hiding the fallback
+      // behind its own toggle, since 3 short quotes was never actually too
+      // much to just show.
       let evidenceHtml = "";
       if (r.evidence && r.evidence.length > 0) {
         evidenceHtml = `<div class="evidence">${r.evidence.map(e =>
           `<p><span class="evidence-quote">" </span>${escapeHtml(e)}</p>`
         ).join("")}</div>`;
       } else if (r.reviews && r.reviews.length > 0) {
-        // Browse mode never has AI-scoring evidence (r.evidence) — that's
-        // Sonnet's "why this matched your search" output, specific to a
-        // real query. Real customer review excerpts fill the same visual
-        // slot instead — but unlike that (short, always-shown) evidence,
-        // three full review quotes are real added height on a sheet that's
-        // already forceExpanded, so this stays behind its own tap instead
-        // of piling directly onto everything else always being visible.
-        evidenceHtml = `
-          <button class="review-toggle-btn" onclick="event.stopPropagation(); toggleReviewQuotes(${index})">
-            <span>See what people are saying</span>
-            <i class="ti ti-chevron-down review-toggle-arrow${r._reviewsExpanded ? ' flipped' : ''}" id="reviewArrow-${index}"></i>
-          </button>
-          <div class="review-quotes${r._reviewsExpanded ? ' open' : ''}" id="reviewQuotes-${index}">
-            ${r.reviews.slice(0, 3).map(rev =>
-              `<p><span class="evidence-quote">" </span>${escapeHtml(truncateReview(rev, 160))}</p>`
-            ).join("")}
-          </div>`;
+        evidenceHtml = `<div class="evidence">${r.reviews.slice(0, 3).map(rev =>
+          `<p><span class="evidence-quote">" </span>${escapeHtml(truncateReview(rev, 160))}</p>`
+        ).join("")}</div>`;
       }
       const photoHtml = r.photo_reference
         ? `<img class="card-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()" onclick="event.stopPropagation(); openLightboxFromCard(${index}, -1)">`
@@ -1137,23 +1130,6 @@
         // the top does nothing and collapsing back never scrolls at all.
         cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
-    }
-
-    // Browse mode's real-review quotes (see buildCardHtml) get their own
-    // toggle instead of riding on the whole card's expand state — that
-    // card is always forceExpanded already, so this is the one thing left
-    // that's actually collapsed by default. Persisted on r itself (not just
-    // the DOM) since loadBrowseMarkerDetails re-renders this card in place
-    // as hours/description arrive, which would otherwise silently re-close it.
-    function toggleReviewQuotes(index) {
-      const el = document.getElementById(`reviewQuotes-${index}`);
-      if (!el) return;
-      const nowOpen = !el.classList.contains('open');
-      el.classList.toggle('open', nowOpen);
-      const arrow = document.getElementById(`reviewArrow-${index}`);
-      if (arrow) arrow.classList.toggle('flipped', nowOpen);
-      const r = currentResults[index];
-      if (r) r._reviewsExpanded = nowOpen;
     }
 
     function loadExtraPhotos(index) {
@@ -1653,6 +1629,12 @@
       // stale — _detailsLoaded would still be true from back then, which
       // would otherwise skip the refetch below entirely.
       r._detailsLoaded = false;
+      // The map itself has to actually exist before openBottomSheet's own
+      // pan-to-marker logic (guarded on `map` being non-null) can do
+      // anything — browsing nearby gets this for free from its /nearby
+      // fetch, but this flow never touches the map otherwise, so without
+      // this there's nothing behind the sheet for "Map" to reveal later.
+      switchView();
       openBottomSheet(0);
       loadBrowseMarkerDetails(0);
     }
@@ -2553,6 +2535,10 @@
       // Mutually exclusive with a real search's results sheet.
       document.getElementById('resultsSheet').hidden = true;
       currentResults = [{ ...item }];
+      // See the identical comment in viewSavedRestaurant — the map has to
+      // actually exist for openBottomSheet's pan-to-marker logic and for
+      // the Map bottom-nav button to have anything to reveal afterward.
+      switchView();
       openBottomSheet(0);
       loadBrowseMarkerDetails(0);
     }
