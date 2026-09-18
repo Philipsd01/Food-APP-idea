@@ -211,6 +211,13 @@
     let map = null;
     let tileLayer = null;
     let markers = [];
+    // Below this zoom, permanent name labels start overlapping once a few
+    // restaurants sit close together — hiding them and leaning on the
+    // numbered pins (still tappable for the name via their popup) matches
+    // how Google Maps and food-delivery apps handle the same problem: they
+    // don't keep persistent text labels floating at every zoom level, only
+    // once you're zoomed in enough for there to be room.
+    const LABEL_ZOOM_THRESHOLD = 15;
     let routeLine = null;
     let routingRouters = {};
     let routeMode = "driving";
@@ -483,11 +490,14 @@
 
     function makePopupHtml(r, index) {
       // browseMode results (see browseNearbyOnMap) are plain nearby listings
-      // with no score/tags/summary — the dot and "View in list" link only
-      // make sense for an actual scored search. Hours/phone/website/a real
-      // review quote fill the same slot once loadBrowseMarkerDetails' lazy
-      // /place-details fetch resolves for this one marker (not fetched for
-      // all nearby results upfront — only the one someone actually taps).
+      // with no score/tags/summary — the dot only makes sense for an actual
+      // scored search. "View in list" still applies to both, just pointed at
+      // a different destination (see below): a real search's already-
+      // rendered card vs. a browse-mode deep dive that renders one on the
+      // spot. Hours/phone/website/a real review quote fill the same slot
+      // once loadBrowseMarkerDetails' lazy /place-details fetch resolves for
+      // this one marker (not fetched for all nearby results upfront — only
+      // the one someone actually taps).
       const hasScore = typeof r.score === "number";
       const scoreClass = r.score >= 80 ? 'high' : r.score >= 50 ? 'medium' : 'low';
       const hasPrice = r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown';
@@ -520,7 +530,7 @@
           ${hoursLine}
           ${descriptionBlock}
           <div class="map-popup-footer">
-            ${!browseMode ? `<button class="map-popup-list-btn" onclick="focusOnList(${index})">View in list</button>` : ''}
+            <button class="map-popup-list-btn" onclick="${browseMode ? `deepDiveRestaurant(${index})` : `focusOnList(${index})`}">View in list</button>
             <div class="map-popup-route-btns">
               ${r.phone ? `<a class="map-popup-route-btn" href="tel:${r.phone}" title="Call"><i class="ti ti-phone"></i></a>` : ''}
               ${r.website ? `<a class="map-popup-route-btn" href="${r.website}" target="_blank" rel="noopener" title="Website"><i class="ti ti-world"></i></a>` : ''}
@@ -545,14 +555,26 @@
       return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + '…';
     }
 
-    // Fires once, the first time a browse-mode marker's popup is opened.
-    // Two separate requests, not one — hours/phone/website (a single fast
-    // Google round trip) update the popup as soon as they're back, and the
-    // AI-written description (see describeRestaurant in server.js), which is
-    // the slower part, arrives and updates the popup again on its own once
-    // it's ready. Blocking both on the LLM call made the whole popup feel
-    // stuck for a couple of seconds with no sign anything was happening.
-    async function loadBrowseMarkerDetails(index, marker) {
+    // Whichever of the marker's popup / the single-card deep-dive view (see
+    // renderSingleCard) is actually showing this result right now gets
+    // refreshed — loadBrowseMarkerDetails doesn't need to know or care which
+    // one that is, since either, both, or neither can be true at once.
+    function refreshBrowseResultDisplay(index) {
+      const r = currentResults[index];
+      const marker = markers[index];
+      if (marker && marker.isPopupOpen()) marker.setPopupContent(makePopupHtml(r, index));
+      if (singleCardIndex === index) resultsBox.innerHTML = buildCardHtml(r, index);
+    }
+
+    // Fires once, the first time a browse-mode marker's popup opens or its
+    // "View in list" deep-dive is opened (see deepDiveRestaurant) — whichever
+    // happens first. Two separate requests, not one — hours/phone/website (a
+    // single fast Google round trip) update the display as soon as they're
+    // back, and the AI-written description (see describeRestaurant in
+    // server.js), which is the slower part, arrives and updates it again on
+    // its own once ready. Blocking both on the LLM call made the display
+    // feel stuck for a couple of seconds with no sign anything was happening.
+    async function loadBrowseMarkerDetails(index) {
       const r = currentResults[index];
       if (!r || !r.place_id || r._detailsLoaded) return;
       r._detailsLoaded = true; // set before the await — a second tap while this is in flight shouldn't refetch
@@ -565,11 +587,20 @@
         r.phone = details.phone;
         r.website = details.website;
         reviews = details.reviews || [];
+        // Same reasoning as the real-search enrichment in server.js: Text
+        // Search only ever gave one photo, Place Details' own list (already
+        // fetched here for free) has up to 5 — and its refs don't match Text
+        // Search's for the same photo, so it has to be the one source of
+        // truth for both the hero and the gallery, not layered on top.
+        if (details.photos && details.photos.length > 0) {
+          r.photos = details.photos;
+          r.photo_reference = details.photos[0];
+        }
       } catch (e) {
-        // Leave r as-is — popup just keeps showing what it already had.
+        // Leave r as-is — display just keeps showing what it already had.
       }
       r._descriptionLoading = true;
-      if (marker.isPopupOpen()) marker.setPopupContent(makePopupHtml(r, index));
+      refreshBrowseResultDisplay(index);
 
       try {
         const res = await fetch("/describe-restaurant", {
@@ -586,7 +617,18 @@
         r.review_quote = truncateReview(reviews[0] || null);
       }
       r._descriptionLoading = false;
-      if (marker.isPopupOpen()) marker.setPopupContent(makePopupHtml(r, index));
+      refreshBrowseResultDisplay(index);
+    }
+
+    // "View in list" from a browse-mode marker's popup — a deep dive into
+    // the one restaurant someone actually tapped, with the same photo
+    // gallery/reviews/ask-box a real search's card has, not a list of every
+    // nearby result (see the conversation this came out of: only the one
+    // place someone taps should ever cost a Place Details + description
+    // call, not all of them).
+    function deepDiveRestaurant(index) {
+      renderSingleCard(index);
+      loadBrowseMarkerDetails(index);
     }
 
     const TAG_FIELDS = [
@@ -690,120 +732,158 @@
 
       resultsBox.innerHTML = "";
       results.forEach((r, index) => {
-        const scoreClass = r.score >= 80 ? "high" : r.score >= 50 ? "medium" : "low";
-        const label = scoreLabel(r.score);
-
-        let cardTagsHtml = "";
-        if (r.tags) {
-          if (r.tags.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${r.tags.cuisine}</span>`;
-          // Our own match score already shows as the big number on the
-          // card — this is Google's independent rating, the number a user
-          // can actually cross-check against Maps/TripAdvisor themselves.
-          if (r.rating) cardTagsHtml += `<span class="card-tag rating"><i class="ti ti-star-filled"></i> ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>`;
-          if (r.tags.price) cardTagsHtml += `<span class="card-tag price">${r.tags.price}</span>`;
-          const distanceLabel = formatDistance(r.distance_km);
-          if (distanceLabel) cardTagsHtml += `<span class="card-tag highlight">${distanceLabel}</span>`;
-          // hours_status ("Closes 10 PM", "Opens 11 AM tomorrow") comes from
-          // Place Details' actual schedule — falls back to the plain
-          // open/closed boolean when a place has no parsed hours at all.
-          if (r.hours_status) {
-            const hoursClass = r.open_now === false ? "closed-now" : "open-now";
-            cardTagsHtml += `<span class="card-tag ${hoursClass}">${r.hours_status}</span>`;
-          } else if (r.open_now === true) {
-            cardTagsHtml += `<span class="card-tag open-now">Open now</span>`;
-          } else if (r.open_now === false) {
-            cardTagsHtml += `<span class="card-tag closed-now">Closed</span>`;
-          }
-        } else if (r.cuisine) {
-          cardTagsHtml += `<span class="card-tag cuisine">${r.cuisine}</span>`;
-        }
-
-        let evidenceHtml = "";
-        if (r.evidence && r.evidence.length > 0) {
-          evidenceHtml = `<div class="evidence">${r.evidence.map(e =>
-            `<p><span class="evidence-quote">" </span>${e}</p>`
-          ).join("")}</div>`;
-        }
-        const photoHtml = r.photo_reference
-          ? `<img class="card-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()" onclick="event.stopPropagation(); openLightboxFromCard(${index}, -1)">`
-          : "";
-
-        // Directions used to open Google Maps in a new tab — now that we
-        // draw our own route with mode + distance/time, it just switches to
-        // our map view instead (defaulting to driving, same as before).
-        // Call/Website depend on Place Details having returned them (not
-        // every listing has both), so those two stay conditional.
-        let actionsHtml = "";
-        if (r.latitude && r.longitude) {
-          actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); showRouteOnMap(${index}, 'driving')"><i class="ti ti-directions"></i> Directions</button>`;
-        }
-        if (r.phone) {
-          actionsHtml += `<a class="card-map-btn" href="tel:${r.phone}" onclick="event.stopPropagation()"><i class="ti ti-phone"></i> Call</a>`;
-        }
-        if (r.website) {
-          actionsHtml += `<a class="card-map-btn" href="${r.website}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-world"></i> Website</a>`;
-        }
-        // Google Places has no dedicated menu field — this is a search
-        // shortcut, not a confirmed official menu link. It works even when
-        // there's no website at all, and the search happens in the user's
-        // own browser, so Google localizes it without us needing to embed
-        // an address in the query.
-        actionsHtml += `<a class="card-map-btn" href="https://www.google.com/search?q=${encodeURIComponent(r.name + " menu")}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-book-2"></i> Menu</a>`;
-
-        const escapedName = r.name.replace(/'/g, "\\'");
-        const isSaved = isRestaurantSaved(r.name);
-
-        // Answering a question needs real review text, which only exists
-        // server-side keyed by place_id — a brand/name search occasionally
-        // returns a restaurant Claude's scoring response didn't name-match
-        // back to filteredData (see searchRestaurants' merge step), so
-        // place_id can be missing. Skip the box rather than offer a feature
-        // that would just error.
-        const askBoxHtml = r.place_id ? `
-            <div class="ask-box" onclick="event.stopPropagation()">
-              <div class="ask-row">
-                <input type="text" class="ask-input" id="askInput-${index}" placeholder="Ask about this place..." onkeydown="if(event.key==='Enter') askRestaurantQuestion(${index})">
-                <button class="ask-btn" onclick="askRestaurantQuestion(${index})" title="Ask"><i class="ti ti-send"></i></button>
-              </div>
-              <p class="ask-answer" id="askAnswer-${index}"></p>
-            </div>` : "";
-
-        // Extra photos beyond the hero shot are only fetched once a card is
-        // actually expanded (see toggleCardExpand) — Google bills each photo
-        // separately, so this container starts empty rather than eagerly
-        // loading photos for cards nobody opens.
-        const hasExtraPhotos = r.photos && r.photos.filter(p => p !== r.photo_reference).length > 0;
-        const galleryHtml = hasExtraPhotos ? `<div class="photo-gallery" id="photoGallery-${index}"></div>` : "";
-
-        resultsBox.innerHTML += `
-          <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="toggleCardExpand(this, ${index})">
-            ${photoHtml}
-            <div class="card-header">
-              <span class="card-name">${r.name}</span>
-              <div class="card-header-right">
-                <button class="save-heart-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveRestaurant('${escapedName}', this)" title="${isSaved ? 'Remove from saved' : 'Save'}">
-                  <i class="ti ti-heart${isSaved ? '-filled' : ''}"></i>
-                </button>
-                <span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${scoreHint(r.score)}"` : ''}>${label}</span>
-              </div>
-            </div>
-            <div class="card-tags">${cardTagsHtml}</div>
-              ${r.score < 80 ? `<p class="card-score-hint">${scoreHint(r.score)}</p>` : ''}
-            <p class="card-summary">${r.summary}</p>
-            ${galleryHtml}
-            ${evidenceHtml}
-            ${askBoxHtml}
-            <div class="card-footer">
-              <div class="card-actions">
-                <button class="card-map-btn" onclick="event.stopPropagation(); focusOnMap(${index})">
-                  <i class="ti ti-map-pin"></i> Show on map
-                </button>
-                ${actionsHtml}
-              </div>
-              <div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>
-            </div>
-          </div>`;
+        resultsBox.innerHTML += buildCardHtml(r, index);
       });
+    }
+
+    // Pulled out of renderResults so a single browse-mode restaurant (see
+    // renderSingleCard / deepDiveRestaurant) can get the exact same card
+    // treatment — photos, gallery, ask box — without a real scored search
+    // behind it. Every score/tags/summary field below is optional for
+    // exactly that reason: a browse-mode r has none of them at first, only
+    // whatever loadBrowseMarkerDetails has filled in so far.
+    function buildCardHtml(r, index) {
+      const hasScore = typeof r.score === "number";
+      const scoreClass = r.score >= 80 ? "high" : r.score >= 50 ? "medium" : "low";
+      const label = scoreLabel(r.score);
+
+      // Rating/distance/hours are read straight off r, not gated behind a
+      // "tags" object existing — a real search always has tags, but a
+      // browse-mode result never does, and it still has a real rating and
+      // distance worth showing.
+      let cardTagsHtml = "";
+      if (r.tags?.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${r.tags.cuisine}</span>`;
+      else if (r.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${r.cuisine}</span>`;
+      // Our own match score (when there is one) already shows as the big
+      // number on the card — this is Google's independent rating, the
+      // number a user can actually cross-check against Maps/TripAdvisor.
+      if (r.rating) cardTagsHtml += `<span class="card-tag rating"><i class="ti ti-star-filled"></i> ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>`;
+      if (r.tags?.price) cardTagsHtml += `<span class="card-tag price">${r.tags.price}</span>`;
+      const distanceLabel = formatDistance(r.distance_km);
+      if (distanceLabel) cardTagsHtml += `<span class="card-tag highlight">${distanceLabel}</span>`;
+      // hours_status ("Closes 10 PM", "Opens 11 AM tomorrow") comes from
+      // Place Details' actual schedule — falls back to the plain
+      // open/closed boolean when a place has no parsed hours at all.
+      if (r.hours_status) {
+        const hoursClass = r.open_now === false ? "closed-now" : "open-now";
+        cardTagsHtml += `<span class="card-tag ${hoursClass}">${r.hours_status}</span>`;
+      } else if (r.open_now === true) {
+        cardTagsHtml += `<span class="card-tag open-now">Open now</span>`;
+      } else if (r.open_now === false) {
+        cardTagsHtml += `<span class="card-tag closed-now">Closed</span>`;
+      }
+
+      let evidenceHtml = "";
+      if (r.evidence && r.evidence.length > 0) {
+        evidenceHtml = `<div class="evidence">${r.evidence.map(e =>
+          `<p><span class="evidence-quote">" </span>${e}</p>`
+        ).join("")}</div>`;
+      }
+      const photoHtml = r.photo_reference
+        ? `<img class="card-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()" onclick="event.stopPropagation(); openLightboxFromCard(${index}, -1)">`
+        : "";
+
+      // Directions used to open Google Maps in a new tab — now that we
+      // draw our own route with mode + distance/time, it just switches to
+      // our map view instead (defaulting to driving, same as before).
+      // Call/Website depend on Place Details having returned them (not
+      // every listing has both), so those two stay conditional.
+      let actionsHtml = "";
+      if (r.latitude && r.longitude) {
+        actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); showRouteOnMap(${index}, 'driving')"><i class="ti ti-directions"></i> Directions</button>`;
+      }
+      if (r.phone) {
+        actionsHtml += `<a class="card-map-btn" href="tel:${r.phone}" onclick="event.stopPropagation()"><i class="ti ti-phone"></i> Call</a>`;
+      }
+      if (r.website) {
+        actionsHtml += `<a class="card-map-btn" href="${r.website}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-world"></i> Website</a>`;
+      }
+      // Google Places has no dedicated menu field — this is a search
+      // shortcut, not a confirmed official menu link. It works even when
+      // there's no website at all, and the search happens in the user's
+      // own browser, so Google localizes it without us needing to embed
+      // an address in the query.
+      actionsHtml += `<a class="card-map-btn" href="https://www.google.com/search?q=${encodeURIComponent(r.name + " menu")}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-book-2"></i> Menu</a>`;
+
+      const escapedName = r.name.replace(/'/g, "\\'");
+      const isSaved = isRestaurantSaved(r.name);
+
+      // Answering a question needs real review text, which only exists
+      // server-side keyed by place_id — a brand/name search occasionally
+      // returns a restaurant Claude's scoring response didn't name-match
+      // back to filteredData (see searchRestaurants' merge step), so
+      // place_id can be missing. Skip the box rather than offer a feature
+      // that would just error.
+      const askBoxHtml = r.place_id ? `
+          <div class="ask-box" onclick="event.stopPropagation()">
+            <div class="ask-row">
+              <input type="text" class="ask-input" id="askInput-${index}" placeholder="Ask about this place..." onkeydown="if(event.key==='Enter') askRestaurantQuestion(${index})">
+              <button class="ask-btn" onclick="askRestaurantQuestion(${index})" title="Ask"><i class="ti ti-send"></i></button>
+            </div>
+            <p class="ask-answer" id="askAnswer-${index}"></p>
+          </div>` : "";
+
+      // Extra photos beyond the hero shot are only fetched once a card is
+      // actually expanded (see toggleCardExpand) — Google bills each photo
+      // separately, so this container starts empty rather than eagerly
+      // loading photos for cards nobody opens.
+      const hasExtraPhotos = r.photos && r.photos.filter(p => p !== r.photo_reference).length > 0;
+      const galleryHtml = hasExtraPhotos ? `<div class="photo-gallery" id="photoGallery-${index}"></div>` : "";
+
+      // Same summary/quote fallback the map popup uses (see makePopupHtml)
+      // — a browse-mode r has no Claude-written "why this matched" summary,
+      // only the general AI description or, failing that, a real review
+      // quote. Shown as a shimmer skeleton (reusing the same .skeleton-line
+      // as the search-loading state) while that's still in flight.
+      const description = r.summary || (r.review_quote ? `“${r.review_quote}”` : null);
+      const summaryHtml = description
+        ? `<p class="card-summary">${description}</p>`
+        : (browseMode && r._descriptionLoading
+            ? `<div class="skeleton-line text1" style="margin-top:8px;"></div><div class="skeleton-line text2"></div>`
+            : "");
+
+      return `
+        <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="toggleCardExpand(this, ${index})">
+          ${photoHtml}
+          <div class="card-header">
+            <span class="card-name">${r.name}</span>
+            <div class="card-header-right">
+              <button class="save-heart-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveRestaurant('${escapedName}', this)" title="${isSaved ? 'Remove from saved' : 'Save'}">
+                <i class="ti ti-heart${isSaved ? '-filled' : ''}"></i>
+              </button>
+              ${hasScore ? `<span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${scoreHint(r.score)}"` : ''}>${label}</span>` : ''}
+            </div>
+          </div>
+          <div class="card-tags">${cardTagsHtml}</div>
+            ${hasScore && r.score < 80 ? `<p class="card-score-hint">${scoreHint(r.score)}</p>` : ''}
+          ${summaryHtml}
+          ${galleryHtml}
+          ${evidenceHtml}
+          ${askBoxHtml}
+          <div class="card-footer">
+            <div class="card-actions">
+              <button class="card-map-btn" onclick="event.stopPropagation(); focusOnMap(${index})">
+                <i class="ti ti-map-pin"></i> Show on map
+              </button>
+              ${actionsHtml}
+            </div>
+            <div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>
+          </div>
+        </div>`;
+    }
+
+    // The list showing exactly one restaurant — a browse-mode "deep dive"
+    // (see deepDiveRestaurant) rather than a real search's full results, so
+    // it can't reuse renderResults' index-per-DOM-position assumption
+    // (focusOnList scrolls to querySelectorAll('.card')[index], which only
+    // holds when every card 0..n is actually rendered).
+    let singleCardIndex = null;
+    function renderSingleCard(index) {
+      const r = currentResults[index];
+      if (!r) return;
+      singleCardIndex = index;
+      resultsBox.innerHTML = buildCardHtml(r, index);
+      switchView('list');
     }
 
     function toggleCardExpand(cardEl, index) {
@@ -814,7 +894,14 @@
         if (c !== cardEl) c.classList.remove('expanded');
       });
       cardEl.classList.toggle('expanded', !wasExpanded);
-      if (!wasExpanded) loadExtraPhotos(index);
+      if (!wasExpanded) {
+        loadExtraPhotos(index);
+        // Expanding reveals photos/reviews/ask-box below the card, which can
+        // land off-screen with no hint there's more — 'nearest' only moves
+        // the page if the card isn't already fully visible, so a tap near
+        // the top does nothing and collapsing back never scrolls at all.
+        cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
 
     function loadExtraPhotos(index) {
@@ -1010,8 +1097,11 @@
 
       stopSuggestionChips();
       // A real search always replaces plain map-browsing — restore the List
-      // option that browseNearbyOnMap() hides (there's a scored list again).
+      // option that browseNearbyOnMap() hides (there's a scored list again),
+      // and drop any single-card deep dive so renderResults' full list
+      // takes over resultsBox instead of getting overwritten mid-render.
       browseMode = false;
+      singleCardIndex = null;
       document.getElementById('btnList').style.display = '';
 
       // Only the immediately preceding message is needed here — analyzeQuery
@@ -1086,12 +1176,6 @@
           <div class="analysis-interpretation">${a.interpretation}</div>
           <div class="analysis-tags">${tagsHtml}</div>`;
         analysisBox.style.display = "block";
-        // Results land here without going through switchView() — the active
-        // tab isn't changing, but the single toggle button still needs to
-        // reflect it (this doesn't run through switchView, which is the
-        // usual place that call happens).
-        updateViewToggleButtons();
-        document.getElementById('viewToggle').style.display = 'flex';
         error.style.display = "none";
 
         currentResults = data.results;
@@ -1143,6 +1227,7 @@
       currentAnalysis = null;
       lastQuery = "";
       browseMode = false;
+      singleCardIndex = null;
       document.getElementById('btnList').style.display = '';
       searchInput.placeholder = "Describe what you're looking for...";
       analysisBox.style.display = "none";
@@ -1299,28 +1384,6 @@
       }).join("");
     }
 
-    // A two-tab bar made it look like "List" and "Map" were both places you
-    // could be, when really only one is ever showing — this collapses it to
-    // a single button that always names the OTHER view (tap "Map" while on
-    // List, the button becomes "List"). browseMode has no list at all, so it
-    // always shows just "Map" regardless of the active/inactive read below.
-    // Called both from switchView() (an explicit tab switch) and from
-    // wherever a search's results land without going through switchView (the
-    // active tab doesn't change then, but the buttons still need to reflect
-    // whichever state search() left browseMode in before results arrived).
-    function updateViewToggleButtons() {
-      const btnList = document.getElementById('btnList');
-      const btnMap = document.getElementById('btnMap');
-      if (browseMode) {
-        btnList.style.display = 'none';
-        btnMap.style.display = '';
-        return;
-      }
-      const mapActive = btnMap.classList.contains('active');
-      btnList.style.display = mapActive ? '' : 'none';
-      btnMap.style.display = mapActive ? 'none' : '';
-    }
-
     function switchView(view) {
       const listEl = document.getElementById('results');
       const mapEl = document.getElementById('mapView');
@@ -1338,10 +1401,10 @@
         mapEl.style.display = 'block';
         btnList.classList.remove('active');
         btnMap.classList.add('active');
-        // 'nearest' only scrolls if the toggle isn't already visible, instead
-        // of always jumping it to the top of the screen — switching tabs
+        // 'nearest' only scrolls if the map isn't already visible, instead of
+        // always jumping it to the top of the screen — switching views
         // shouldn't feel like the page yanked control away from you.
-        document.getElementById('viewToggle').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        mapEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         if (isLoading) {
           // A search can still be in flight when someone switches to Map —
           // show its own spinner here instead of leaving the list's skeleton
@@ -1357,8 +1420,13 @@
         }
       }
 
-      updateViewToggleButtons();
-      document.getElementById('viewToggle').style.display = 'flex';
+      // The top-bar map-pin button is the one and only List/Map control now
+      // (see browseNearbyOnMap, which doubles as that toggle whenever a real
+      // search is active) — this bar stays hidden permanently rather than
+      // duplicating it. btnList/btnMap's own active/inactive classes above
+      // are still real and still read elsewhere (e.g. to know which view is
+      // current) — only this container's visibility is retired.
+      document.getElementById('viewToggle').style.display = 'none';
     }
 
     // Entry point for someone who'd rather just look at what's around than
@@ -1368,19 +1436,29 @@
     // query afterwards still works as normal — search() clears browseMode
     // and takes back over.
     async function browseNearbyOnMap() {
-      // Acts as a toggle — tapping it again while already browsing goes
-      // back to the start screen instead of just re-fetching the same spot.
+      // Acts as a toggle. From the nearby-markers map itself (browse mode's
+      // "top level"), tapping again exits back to the start screen. From a
+      // "View in list" deep dive on one restaurant, it steps back up to that
+      // map instead of exiting all the way out — same one button, but it
+      // goes exactly one level up rather than always all the way to zero.
       if (browseMode) {
+        const isMapActive = document.getElementById('btnMap').classList.contains('active');
+        if (!isMapActive) {
+          singleCardIndex = null;
+          switchView('map');
+          return;
+        }
         resetSearch();
         return;
       }
       // A real search that's loading, or already showing results, owns this
       // button while it's active — it should just flip between that
-      // search's own List/Map tabs (exactly like the tabs themselves do),
-      // not launch a separate "what's nearby" browse that silently replaces
-      // the search. viewToggle's own display state already tracks this: it's
-      // hidden only when there's truly no search in progress or on screen.
-      if (isLoading || document.getElementById('viewToggle').style.display !== 'none') {
+      // search's own List/Map view (this is the only control for that now
+      // that the pill under the search box is retired), not launch a
+      // separate "what's nearby" browse that silently replaces the search.
+      // currentAnalysis is only non-null once a search has actually run —
+      // resetSearch() clears it back to null for the plain start screen.
+      if (isLoading || currentAnalysis) {
         const isMapActive = document.getElementById('btnMap').classList.contains('active');
         switchView(isMapActive ? 'list' : 'map');
         return;
@@ -1404,9 +1482,6 @@
       markers = [];
       clearRoute();
 
-      // No scored list exists in browse mode — only Map is a real option.
-      document.getElementById('btnList').style.display = 'none';
-      document.getElementById('viewToggle').style.display = 'flex';
       switchView('map');
 
       try {
@@ -1487,6 +1562,23 @@
       });
     }
 
+    function shouldShowLabels() {
+      return map && map.getZoom() >= LABEL_ZOOM_THRESHOLD;
+    }
+
+    // Called on every zoomend, plus once right after (re)creating markers so
+    // a map that opens already zoomed out doesn't briefly show them all.
+    // Skips whichever marker currently has its popup open — that one's
+    // label stays closed regardless of zoom (see the popupopen handlers
+    // below), since the popup already shows the name.
+    function updateMarkerLabelVisibility() {
+      const show = shouldShowLabels();
+      markers.forEach(m => {
+        if (!m || m.isPopupOpen()) return;
+        if (show) m.openTooltip(); else m.closeTooltip();
+      });
+    }
+
     function initMap(results) {
       const mapEl = document.getElementById('mapView');
 
@@ -1501,6 +1593,7 @@
             : [34.6687, 135.5014];
         map = L.map(mapEl, { zoomControl: false }).setView(initialCenter, 15);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
+        map.on('zoomend', updateMarkerLabelVisibility);
       } else {
         markers.forEach(m => m.remove());
         markers = [];
@@ -1532,14 +1625,23 @@
           // another restaurant drops whatever route doesn't belong to it.
           .on('popupopen', () => {
             if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute();
-            if (browseMode) loadBrowseMarkerDetails(index, marker);
-          });
+            if (browseMode) loadBrowseMarkerDetails(index);
+            // The permanent name label is redundant (and visibly peeks out
+            // from behind the popup) once the popup showing that same name
+            // is open — hide it for the duration, restore it on close.
+            marker.closeTooltip();
+          })
+          // Only reopen it if the zoom level actually has room for it — a
+          // popup closing while zoomed out shouldn't bring back a label
+          // that's just going to overlap its neighbors again.
+          .on('popupclose', () => { if (shouldShowLabels()) marker.openTooltip(); });
         // Indexed, not pushed — a restaurant with no coordinates gets skipped
         // above without advancing this array, so push() would silently drift
         // every later marker's position out of sync with currentResults[index]
         // (focusOnMap uses that same index to open a popup).
         markers[index] = marker;
       });
+      updateMarkerLabelVisibility();
     }
 
     function focusOnList(index) {
@@ -1619,6 +1721,14 @@
         // label) entirely behind the popup card, so close it once a route
         // is on its way.
         map.closePopup();
+        // Every other restaurant is just clutter while you're looking at
+        // directions to one — hide their markers rather than destroying
+        // them, so clearRoute() can put them straight back with no refetch.
+        markers.forEach((m, i) => {
+          if (!m) return;
+          if (i === index) { if (!map.hasLayer(m)) m.addTo(map); }
+          else if (map.hasLayer(m)) map.removeLayer(m);
+        });
         drawRoute();
       }, 250);
     }
@@ -1649,6 +1759,9 @@
     function clearRoute() {
       if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
       routeTargetIndex = null;
+      // Bring back whichever markers showRouteOnMap hid to isolate the
+      // route — they were only removed from the map layer, never destroyed.
+      if (map) markers.forEach(m => { if (m && !map.hasLayer(m)) m.addTo(map); });
     }
 
     function toggleTheme() {
@@ -1676,10 +1789,13 @@
             .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' })
             .on('popupopen', () => {
               if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute();
-              if (browseMode) loadBrowseMarkerDetails(index, marker);
-            });
+              if (browseMode) loadBrowseMarkerDetails(index);
+              marker.closeTooltip();
+            })
+            .on('popupclose', () => { if (shouldShowLabels()) marker.openTooltip(); });
           markers[index] = marker;
         });
+        updateMarkerLabelVisibility();
       }
     }
 
