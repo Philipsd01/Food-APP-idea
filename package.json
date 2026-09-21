@@ -13,7 +13,10 @@
     "@anthropic-ai/sdk": "^0.86.1",
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "axios": "^1.16.1",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "google-auth-library": "^11.1.0",
+    "jsonwebtoken": "^9.0.3"
   }
 }

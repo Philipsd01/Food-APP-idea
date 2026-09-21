@@ -3,9 +3,13 @@ require("dotenv").config();
 const express = require("express");
 const Anthropic = require("@anthropic-ai/sdk");
 const axios = require("axios");
+const cookieParser = require("cookie-parser");
+const jwt = require("jsonwebtoken");
+const { OAuth2Client } = require("google-auth-library");
 
 const app = express();
 app.use(express.json());
+app.use(cookieParser());
 app.use(express.static("public"));
 
 const client = new Anthropic({
@@ -13,6 +17,35 @@ const client = new Anthropic({
 });
 
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+
+// ── Google Sign-In ──
+// Verifies the ID token Google's own frontend library hands us (see
+// google.accounts.id.initialize in index.html), then issues our own signed
+// session cookie — nothing about the user's Google credentials themselves
+// ever touches our server beyond that one verification.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const SESSION_SECRET = process.env.SESSION_SECRET;
+const SESSION_COOKIE = "session";
+const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const googleAuthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+function signSession(user) {
+  return jwt.sign(user, SESSION_SECRET, { expiresIn: "30d" });
+}
+
+// Trusts only what we ourselves put in the token (see signSession) — the
+// Google verification already happened once, at sign-in time, not on every
+// request.
+function readSession(req) {
+  const token = req.cookies[SESSION_COOKIE];
+  if (!token) return null;
+  try {
+    const { sub, email, name, picture } = jwt.verify(token, SESSION_SECRET);
+    return { sub, email, name, picture };
+  } catch {
+    return null;
+  }
+}
 
 // Fallback only — used if the browser's geolocation fails or is denied.
 // No longer assumes Osaka; leave null and require real coordinates instead.
@@ -1092,6 +1125,54 @@ app.get("/photo", async (req, res) => {
     console.error("Photo proxy failed:", error.message);
     res.status(502).send("Photo unavailable");
   }
+});
+
+// Client IDs aren't secret (they're meant to end up in frontend JS,
+// unlike GOOGLE_API_KEY above) — this just avoids hardcoding it into
+// index.html directly, since there's no build step to template it in.
+app.get("/config", (req, res) => {
+  res.json({ googleClientId: GOOGLE_CLIENT_ID || null });
+});
+
+// Called with the ID token from google.accounts.id's callback (see
+// index.html) — verifying it here, server-side, is what actually proves the
+// sign-in is real rather than trusting whatever the client claims.
+app.post("/auth/google", async (req, res) => {
+  const { credential } = req.body;
+  if (!credential) return res.status(400).json({ error: "Missing credential" });
+  if (!GOOGLE_CLIENT_ID || !SESSION_SECRET) {
+    return res.status(500).json({ error: "Sign-in isn't configured on this server yet" });
+  }
+  try {
+    const ticket = await googleAuthClient.verifyIdToken({ idToken: credential, audience: GOOGLE_CLIENT_ID });
+    const payload = ticket.getPayload();
+    const user = { sub: payload.sub, email: payload.email, name: payload.name, picture: payload.picture };
+    res.cookie(SESSION_COOKIE, signSession(user), {
+      httpOnly: true,
+      sameSite: "lax",
+      // req.secure alone misses the common case of running behind a
+      // reverse proxy that terminates TLS — Express only trusts the
+      // forwarded-proto header once "trust proxy" is set, which is a
+      // deploy-time decision, not something to guess at here.
+      secure: req.secure,
+      maxAge: SESSION_MAX_AGE_MS,
+    });
+    res.json({ user });
+  } catch (error) {
+    console.error("Google sign-in verification failed:", error.message);
+    res.status(401).json({ error: "Sign-in failed" });
+  }
+});
+
+// Restores the signed-in state on page load — the cookie persists across
+// reloads, but the frontend still needs to ask what's actually in it.
+app.get("/auth/me", (req, res) => {
+  res.json({ user: readSession(req) });
+});
+
+app.post("/auth/logout", (req, res) => {
+  res.clearCookie(SESSION_COOKIE);
+  res.json({ ok: true });
 });
 
 app.listen(3000, () => {

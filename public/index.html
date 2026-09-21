@@ -10,9 +10,23 @@
   <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
   <link rel="stylesheet" href="style.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 
 <body>
+  <!-- Visible by default (no "hidden" attribute) so there's never a flash
+       of the real app before we know whether a session cookie is actually
+       valid — restoreSession() hides this once /auth/me confirms someone's
+       signed in, and it's the first thing shown again after sign-out. -->
+  <div class="login-gate" id="loginGate">
+    <div class="login-gate-content">
+      <p class="header-label">discover</p>
+      <p class="header-title">Search smarter, eat better</p>
+      <p class="login-gate-subtitle">Sign in to get started.</p>
+      <div id="googleSignInBtnGate" class="login-gate-google-btn"></div>
+    </div>
+  </div>
+
   <div class="menu-overlay" id="menuOverlay" onclick="closeMenu()"></div>
 
   <div class="side-menu" id="sideMenu">
@@ -30,9 +44,23 @@
         <i class="ti ti-chevron-down section-arrow"></i>
       </div>
       <div class="menu-section-items">
-        <div class="menu-item" onclick="closeMenu()">
-          <span>Login / Sign up</span>
-          <i class="ti ti-chevron-right menu-arrow"></i>
+        <div id="accountSignedOut">
+          <!-- Filled in by google.accounts.id.renderButton (see
+               initGoogleSignIn) — Google's own button, not a custom one, so
+               it stays visually consistent with every other Google Sign-In
+               button and Google can keep it current on their end. -->
+          <div id="googleSignInBtn" class="google-signin-btn"></div>
+        </div>
+        <div id="accountSignedIn" class="account-profile" hidden>
+          <img id="accountAvatar" class="account-avatar" alt="">
+          <div class="account-info">
+            <span class="account-name" id="accountName"></span>
+            <span class="account-email" id="accountEmail"></span>
+          </div>
+          <div class="menu-item account-signout" onclick="signOutGoogle()">
+            <i class="ti ti-logout"></i>
+            <span>Sign out</span>
+          </div>
         </div>
       </div>
     </div>
@@ -180,7 +208,11 @@
        actual point of a search, so the list is always at least peeking,
        just collapsible down to make more room for the map. -->
   <div class="results-sheet" id="resultsSheet" hidden>
-    <button type="button" class="results-sheet-handle-row" id="resultsSheetHandleRow" onclick="toggleResultsSheetState()">
+    <!-- No onclick here — tap vs. drag is decided entirely inside
+         setupResultsSheetDrag now (see its own comment): a button's native
+         click firing right after pointerup was clobbering whatever the
+         drag itself had just snapped to. -->
+    <button type="button" class="results-sheet-handle-row" id="resultsSheetHandleRow">
       <div class="sheet-handle"></div>
       <i class="ti ti-chevron-up results-sheet-arrow" id="resultsSheetArrow"></i>
     </button>
@@ -196,7 +228,11 @@
        still-visible map, Google Maps/Airbnb-style, instead of navigating
        away to a separate list screen — so there's no List/Map toggle
        button involved in viewing one place at all. -->
-  <div class="sheet-backdrop" id="sheetBackdrop" onclick="closeBottomSheet()"></div>
+  <!-- No onclick dismiss here (see .sheet-backdrop.open's own comment) —
+       this spans the full screen above the nav, not just the area behind
+       the sheet, which would swallow taps on the visible map strip above
+       it too. Closing goes through the X button or the drag-down gesture. -->
+  <div class="sheet-backdrop" id="sheetBackdrop"></div>
   <div class="bottom-sheet" id="bottomSheet">
     <div class="sheet-handle-row" id="sheetHandleRow">
       <div class="sheet-handle"></div>
@@ -224,7 +260,7 @@
       <button class="route-mode-btn" id="routeModeBtn-cycling" onclick="setRouteMode('cycling')" title="Bike"><i class="ti ti-bike"></i></button>
       <button class="route-mode-btn" id="routeModeBtn-walking" onclick="setRouteMode('walking')" title="Walk"><i class="ti ti-walk"></i></button>
     </div>
-    <button class="route-panel-close" onclick="clearRoute()" title="Exit directions">
+    <button class="route-panel-close" onclick="exitDirections()" title="Exit directions">
       <i class="ti ti-x"></i>
     </button>
   </div>
@@ -291,10 +327,12 @@
     // restaurant someone is actually looking at right now, instead of
     // falling back to whatever was last deep-dived (or nothing).
     let activeMapIndex = null;
-    // Whether the real-search results sheet (see setResultsSheetState) is
-    // expanded to show the full ranked list, or just peeking — never fully
-    // closed on its own (see the .route-hidden class for the one exception).
-    let resultsSheetFull = false;
+    // Which of the real-search results sheet's three states (see
+    // setResultsSheetState) is showing — 'mini' (Apple Stocks/Maps-style,
+    // just the handle), 'peek' (analysis + tags, the default after a
+    // search), or 'full' (the ranked list). Never fully closed on its own
+    // (see the .route-hidden class for the one exception).
+    let resultsSheetState = 'peek';
 
     // Every restaurant name, review, and AI-generated description ultimately
     // traces back to Google (business names, customer reviews) or a user's
@@ -658,7 +696,15 @@
       if (singleCardIndex === index) {
         const sheetContent = document.getElementById('sheetContent');
         if (sheetContent) {
+          // Cards start collapsed and the user can tap to expand them now
+          // (see buildCardHtml) — this re-render can fire well after that
+          // tap (loadBrowseMarkerDetails' description arrives separately,
+          // slower than hours/phone/website), so without carrying the
+          // state across, a card someone just opened would silently
+          // collapse back under them the moment new details land.
+          const wasExpanded = sheetContent.querySelector('.card')?.classList.contains('expanded');
           sheetContent.innerHTML = buildCardHtml(r, index, true);
+          if (wasExpanded) sheetContent.querySelector('.card').classList.add('expanded');
           // The re-render above replaces the whole card, including the
           // gallery container loadExtraPhotos already filled in — refill it
           // (cheap: r.photos is already in memory, no fetch involved).
@@ -757,9 +803,10 @@
       clearRoute();
       singleCardIndex = index;
       document.getElementById('sheetContent').innerHTML = buildCardHtml(r, index, true);
-      // loadExtraPhotos normally only runs once a card is tap-expanded —
-      // this card starts already expanded (see buildCardHtml's
-      // forceExpanded), so nothing else would ever trigger it.
+      // Card starts collapsed like any other (see buildCardHtml) — this
+      // pre-fetches the gallery thumbnails anyway so they're already there
+      // the moment someone taps it open, instead of a visible pop-in delay
+      // right as the gallery reveals.
       loadExtraPhotos(index);
       document.getElementById('bottomSheet').classList.add('open');
       document.getElementById('sheetBackdrop').classList.add('open');
@@ -768,13 +815,20 @@
       // Nudges the marker into the strip of map that stays visible above
       // the sheet, same idea as focusOnMap's popup-height nudge but for a
       // much taller panel — approximate, worth eyeballing/tuning visually
-      // rather than treating this offset as exact.
+      // rather than treating this offset as exact. A separate recenter +
+      // panBy (even with only one of them animated) is still two distinct
+      // motions playing back to back — an instant jump immediately followed
+      // by a slide reads as choppy as two animated ones did. Projecting the
+      // target point, offsetting it in pixel space, then unprojecting back
+      // gets the exact same end position in a single setView, one motion.
       if (map && r.latitude && r.longitude) {
         setTimeout(() => {
           map.invalidateSize();
-          map.setView([r.latitude, r.longitude], map.getZoom() < 15 ? 16 : map.getZoom(), { animate: true });
+          const targetZoom = map.getZoom() < 15 ? 16 : map.getZoom();
           const sheetHeight = document.getElementById('bottomSheet').offsetHeight;
-          map.panBy([0, sheetHeight / 2], { animate: true });
+          const targetPoint = map.project([r.latitude, r.longitude], targetZoom).add([0, sheetHeight / 2]);
+          const targetCenter = map.unproject(targetPoint, targetZoom);
+          map.setView(targetCenter, targetZoom, { animate: true });
         }, 320);
       }
     }
@@ -938,11 +992,12 @@
     // behind it. Every score/tags/summary field below is optional for
     // exactly that reason: a browse-mode r has none of them at first, only
     // whatever loadBrowseMarkerDetails has filled in so far.
-    // forceExpanded skips the collapsed starting state entirely — used for
-    // the bottom sheet (see openBottomSheet), where tapping "View details"
-    // already was the "show me everything" gesture, so a second tap inside
-    // to reveal photos/reviews/ask-box would just be redundant friction.
-    // Regular list/map-popup cards still default to collapsed (false).
+    // Every card — list, map popup, or the bottom sheet's single restaurant
+    // (forceExpanded) alike — now starts collapsed and uses the same
+    // toggleCardExpand tap gesture; forceExpanded no longer changes the
+    // starting state, only whether "Show on map" makes sense (see below —
+    // reached via that exact restaurant's own marker, there's no other map
+    // to jump to).
     function buildCardHtml(r, index, forceExpanded = false) {
       const hasScore = typeof r.score === "number";
       const scoreClass = r.score >= 80 ? "high" : r.score >= 50 ? "medium" : "low";
@@ -1064,7 +1119,7 @@
             : "");
 
       return `
-        <div class="card ${forceExpanded ? 'expanded' : ''}" style="animation-delay: ${index * 0.08}s;" ${forceExpanded ? '' : `onclick="toggleCardExpand(this, ${index})"`}>
+        <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="toggleCardExpand(this, ${index})">
           ${photoHtml}
           <div class="card-header">
             <span class="card-name">${safeName}</span>
@@ -1093,7 +1148,16 @@
               </button>`}
               ${actionsHtml}
             </div>
-            ${forceExpanded ? '' : '<div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>'}
+            <!-- Always rendered, not just for the non-forceExpanded list
+                 case — .card.expanded .hint-text already hides this via CSS
+                 whenever the card is open, so it was only ever missing here
+                 because forceExpanded cards never got the element at all,
+                 not because it didn't apply. Without it, forceExpanded
+                 cards (a showcase carousel item, a marker's deep dive) had
+                 no way to signal that tapping again collapses them, since
+                 toggleCardExpand now applies there too (see the card's own
+                 onclick above). -->
+            <div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>
           </div>
         </div>`;
     }
@@ -1105,9 +1169,14 @@
 
     function toggleCardExpand(cardEl, index) {
       const wasExpanded = cardEl.classList.contains('expanded');
-      // Only one card open at a time — expanding a new one collapses
-      // whatever was already open instead of letting them stack up.
-      document.querySelectorAll('.card.expanded').forEach(c => {
+      // Only one card open at a time within the same list — expanding a new
+      // one collapses whatever was already open there instead of letting
+      // them stack up. Scoped to cardEl's own container (not the whole
+      // document) now that a forceExpanded card also calls this — a
+      // real-search list and the single-restaurant sheet's lone card can
+      // both be sitting in the DOM at once (one of them just hidden), and a
+      // document-wide query would collapse a card in the wrong one.
+      cardEl.parentElement.querySelectorAll('.card.expanded').forEach(c => {
         if (c !== cardEl) c.classList.remove('expanded');
       });
       cardEl.classList.toggle('expanded', !wasExpanded);
@@ -1305,6 +1374,13 @@
       const previousQuery = lastQuery || null;
 
       resultsBox.innerHTML = "";
+      // The "What I understood" panel from a previous search (most visible
+      // after a no-match/off-topic query, where resultsBox itself was the
+      // only other thing showing) was never cleared here — it stayed put
+      // underneath the loading spinner below until the new response
+      // overwrote it, instead of loading starting from a clean sheet.
+      analysisBox.style.display = "none";
+      analysisBox.innerHTML = "";
       // A compact spinner instead of full skeleton cards — this sits in the
       // sheet's peek state (~190px) while we wait, so nothing has to jump
       // straight to full height before there's anything real to show. The
@@ -1730,8 +1806,8 @@
       // state to represent — it's always just "Map" there (see
       // browseNearbyOnMap, which no longer does anything else for it).
       if (!browseMode && (isLoading || currentAnalysis)) {
-        icon = resultsSheetFull ? 'ti-map-2' : 'ti-list';
-        label = resultsSheetFull ? 'Map' : 'List';
+        icon = resultsSheetState === 'full' ? 'ti-map-2' : 'ti-list';
+        label = resultsSheetState === 'full' ? 'Map' : 'List';
       }
       document.querySelectorAll('.map-nav-icon').forEach(el => el.className = `ti ${icon} map-nav-icon`);
       document.querySelectorAll('.map-nav-label').forEach(el => el.textContent = label);
@@ -1739,23 +1815,108 @@
       if (topBtn) topBtn.title = label === 'List' ? 'Back to list' : 'Browse nearby on the map';
     }
 
-    // Expands/collapses the real-search results sheet between its two
-    // states — never fully closed (see resultsSheetFull), just how much of
+    // Moves the real-search results sheet between its three states — never
+    // fully closed (see resultsSheetState's own comment), just how much of
     // the map is visible above it. Clearing any inline height first matters
-    // once the sheet supports a drag gesture too (not yet built) — an
-    // inline height from mid-drag would otherwise override the class-driven
-    // one this sets.
+    // because of setupResultsSheetDrag: a live drag sets this inline, and
+    // that has to be cleared for the class-driven height (and its
+    // transition) to actually take back over once the drag ends.
     function setResultsSheetState(state) {
       const sheet = document.getElementById('resultsSheet');
-      resultsSheetFull = state === 'full';
+      resultsSheetState = state;
       sheet.style.height = '';
-      sheet.classList.toggle('full', resultsSheetFull);
+      sheet.classList.toggle('mini', state === 'mini');
+      sheet.classList.toggle('full', state === 'full');
+      // Explicitly asking for a peek/full state means the list is meant to
+      // be visible — clears whatever showRouteOnMap's .route-hidden left
+      // behind, so every path that actually wants the sheet shown (a fresh
+      // search, "View in list", the bottom nav's List toggle) un-hides it
+      // in one place instead of each needing to know about that class.
+      sheet.classList.remove('route-hidden');
       updateMapNavIcon();
     }
 
+    // Discrete peek<->full toggle — used by the bottom nav's Map/List
+    // button (see browseNearbyOnMap), which has no drag gesture of its own
+    // to fall back on. The handle itself no longer calls this directly
+    // (see setupResultsSheetDrag): a tap there now goes through the same
+    // drag pipeline as a real drag, just with ~0 movement.
     function toggleResultsSheetState() {
-      setResultsSheetState(resultsSheetFull ? 'peek' : 'full');
+      setResultsSheetState(resultsSheetState === 'full' ? 'peek' : 'full');
     }
+
+    // Apple Stocks/Maps-style drag between the sheet's three snap points,
+    // dragging the handle itself — same pointer-event pattern as
+    // setupSheetDrag for the single-restaurant sheet, but height-based
+    // (this sheet crops its own content from the bottom as it shrinks)
+    // rather than transform-based, since that's how its three states are
+    // already defined (see .results-sheet.mini/.full).
+    (function setupResultsSheetDrag() {
+      const sheet = document.getElementById('resultsSheet');
+      const handle = document.getElementById('resultsSheetHandleRow');
+      const MINI_H = 60, PEEK_H = 190;
+      // Below this, a release counts as a tap rather than a drag — matters
+      // because the handle used to be a <button onclick=...> on top of
+      // this same pointer logic: its native click fired right after every
+      // pointerup and immediately overwrote whatever the drag had just
+      // snapped to (including stomping straight past 'mini', which that
+      // click handler didn't even know existed). One handler deciding both
+      // gestures avoids that fight entirely.
+      const TAP_THRESHOLD_PX = 8;
+      let startY = 0, startHeight = 0, dragging = false, maxMove = 0;
+
+      // vh-based, like .results-sheet.full itself — recomputed per drag
+      // rather than cached, so an orientation change mid-session doesn't
+      // leave this stale.
+      function fullHeight() {
+        return window.innerHeight * 0.7;
+      }
+
+      handle.addEventListener('pointerdown', (e) => {
+        dragging = true;
+        maxMove = 0;
+        startY = e.clientY;
+        startHeight = sheet.getBoundingClientRect().height;
+        sheet.style.transition = 'none';
+        handle.setPointerCapture(e.pointerId);
+      });
+
+      handle.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        // Dragging up (finger moves to a smaller clientY) should grow the
+        // sheet, hence startY - e.clientY rather than the reverse.
+        const delta = startY - e.clientY;
+        maxMove = Math.max(maxMove, Math.abs(delta));
+        const next = Math.max(MINI_H, Math.min(fullHeight(), startHeight + delta));
+        sheet.style.height = `${next}px`;
+      });
+
+      function endDrag() {
+        if (!dragging) return;
+        dragging = false;
+        sheet.style.transition = '';
+        if (maxMove < TAP_THRESHOLD_PX) {
+          // Barely moved (or didn't at all) — a tap, not a drag. The height
+          // set live by pointermove (if any) needs clearing first, or it'd
+          // override whatever class setResultsSheetState is about to apply.
+          sheet.style.height = '';
+          toggleResultsSheetState();
+          return;
+        }
+        // Snaps to whichever of the three states the release point actually
+        // landed closest to, rather than requiring a precise drag — a small
+        // nudge from peek still counts as "stay at peek" instead of
+        // overshooting to mini or full.
+        const h = sheet.getBoundingClientRect().height;
+        const full = fullHeight();
+        const distances = { mini: Math.abs(h - MINI_H), peek: Math.abs(h - PEEK_H), full: Math.abs(h - full) };
+        const nearest = Object.keys(distances).reduce((a, b) => distances[a] <= distances[b] ? a : b);
+        setResultsSheetState(nearest);
+      }
+
+      handle.addEventListener('pointerup', endDrag);
+      handle.addEventListener('pointercancel', endDrag);
+    })();
 
     // Entry point for someone who'd rather just look at what's around than
     // describe what they want — jumps straight to the map with plain nearby
@@ -1786,7 +1947,7 @@
         // just expanding to the top of the full list — but only when
         // expanding; collapsing from a highlighted card should still just
         // collapse, not re-highlight it.
-        if (!resultsSheetFull && activeMapIndex !== null) focusOnList(activeMapIndex);
+        if (resultsSheetState !== 'full' && activeMapIndex !== null) focusOnList(activeMapIndex);
         else toggleResultsSheetState();
         return;
       }
@@ -1927,11 +2088,13 @@
         L.control.zoom({ position: 'bottomright' }).addTo(map);
         map.on('zoomend', updateMarkerLabelVisibility);
         // Tapping empty map — not a marker, Leaflet doesn't bubble those
-        // clicks up to the map itself — collapses an open results sheet
-        // back to peek, Google-Maps-style, so there's always an easy way
-        // back to the map without needing "Show on map" inside a card.
+        // clicks up to the map itself — drops the results sheet all the way
+        // to mini, same as tapping the stock list behind Apple's Stocks app
+        // panel sends that panel to its own smallest state rather than just
+        // one step down. Maximizes the map instead of leaving a peek-sized
+        // strip of the sheet still sitting over it.
         map.on('click', () => {
-          if (!browseMode && resultsSheetFull) setResultsSheetState('peek');
+          if (!browseMode && resultsSheetState !== 'mini') setResultsSheetState('mini');
         });
       } else {
         markers.forEach(m => m.remove());
@@ -1968,7 +2131,23 @@
           // another restaurant drops whatever route doesn't belong to it.
           .on('popupopen', () => {
             if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute();
-            if (browseMode) loadBrowseMarkerDetails(index);
+            // bindPopup's content is a static string generated once, back
+            // when this marker was first created — if details finished
+            // loading while this popup happened to be closed (e.g. opened
+            // from a showcase carousel/saved restaurant, where
+            // loadBrowseMarkerDetails already ran before the map was even
+            // visible), refreshBrowseResultDisplay's own isPopupOpen() guard
+            // skipped updating it, leaving it permanently stuck showing
+            // empty/skeleton content. Refreshing here too, on every open,
+            // means this always reflects whatever's actually known right
+            // now regardless of that timing. loadBrowseMarkerDetails itself
+            // still no-ops if already loaded (see its own r._detailsLoaded
+            // guard) — this only covers the "already have it, just never
+            // painted it" gap.
+            if (browseMode) {
+              marker.setPopupContent(makePopupHtml(r, index));
+              loadBrowseMarkerDetails(index);
+            }
             // The permanent name label is redundant (and visibly peeks out
             // from behind the popup) once the popup showing that same name
             // is open — hide it for the duration, restore it on close.
@@ -2000,6 +2179,13 @@
     }
 
     function focusOnList(index) {
+      // "View in list" from a marker's popup was reachable while directions
+      // were still active (the target restaurant's own marker stays on the
+      // map during a route) — setResultsSheetState alone couldn't reveal
+      // anything then, since .route-hidden still had the sheet slid fully
+      // off-screen (see showRouteOnMap). Mirrors openBottomSheet's own
+      // clearRoute() call for the same reason.
+      clearRoute();
       setResultsSheetState('full');
       setTimeout(() => {
         document.querySelectorAll('.card.highlighted')
@@ -2159,14 +2345,31 @@
       );
     }
 
+    // The route panel's own exit (✕) — capturing the target before
+    // clearRoute resets it, so that restaurant's popup reappears once
+    // directions are gone instead of leaving a bare map with nothing
+    // selected. Kept separate from clearRoute itself, which runs from
+    // several other places (a fresh search, opening the single-restaurant
+    // sheet, "View in list") where popping a popup back open would just be
+    // a stray leftover from the directions flow, not what's actually
+    // happening next.
+    function exitDirections() {
+      const index = routeTargetIndex;
+      clearRoute();
+      const marker = markers[index];
+      if (marker) marker.openPopup();
+    }
+
     function clearRoute() {
       if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
       routeTargetIndex = null;
       document.getElementById('routePanel').hidden = true;
-      // Slides the results sheet back into view exactly as it was (still
-      // peek or full, whichever it last was) — a no-op if it was never
-      // shown to begin with (e.g. browse mode).
-      document.getElementById('resultsSheet').classList.remove('route-hidden');
+      // Deliberately doesn't touch .route-hidden on the results sheet —
+      // exiting directions (see exitDirections) reopens that restaurant's
+      // popup instead, and un-hiding the list at the same time meant both
+      // showed at once. Whatever actually wants the list visible again
+      // (a fresh search, "View in list", the bottom nav's List toggle) goes
+      // through setResultsSheetState, which clears it there instead.
       // Bring back whichever markers showRouteOnMap hid to isolate the
       // route — they were only removed from the map layer, never destroyed.
       if (map) markers.forEach(m => { if (m && !map.hasLayer(m)) m.addTo(map); });
@@ -2200,7 +2403,11 @@
             .bindPopup(makePopupHtml(r, index), { closeButton: false, className: 'custom-popup' })
             .on('popupopen', () => {
               if (routeTargetIndex !== null && routeTargetIndex !== index) clearRoute();
-              if (browseMode) loadBrowseMarkerDetails(index);
+              // See the identical comment on this same line in initMap.
+              if (browseMode) {
+                marker.setPopupContent(makePopupHtml(r, index));
+                loadBrowseMarkerDetails(index);
+              }
               marker.closeTooltip();
               activeMapIndex = index;
               updateMapNavIcon();
@@ -2575,6 +2782,133 @@
     renderSearchHistory();
     renderSavedRestaurantsMenu();
     startSuggestionChips();
+
+    // ── Google Sign-In ──
+    // Identity + a login gate (see #loginGate) — the app itself is unusable
+    // until you've signed in at least once, but the 30-day session cookie
+    // (see server.js) means that's normally a one-time thing, not something
+    // you hit on every visit. Nothing beyond identity is tied to the
+    // account yet: saved restaurants/search history stay in localStorage as
+    // before, shared by whoever uses this browser regardless of who's
+    // signed in — tying those to the account specifically is a separate,
+    // bigger step (real per-user storage) for later.
+    let currentUser = null;
+
+    function renderAccountUI() {
+      const signedOut = document.getElementById('accountSignedOut');
+      const signedIn = document.getElementById('accountSignedIn');
+      signedOut.hidden = !!currentUser;
+      signedIn.hidden = !currentUser;
+      if (currentUser) {
+        document.getElementById('accountAvatar').src = currentUser.picture || '';
+        document.getElementById('accountName').textContent = currentUser.name || '';
+        document.getElementById('accountEmail').textContent = currentUser.email || '';
+      }
+    }
+
+    // Fires from google.accounts.id's own button (see initGoogleSignIn) —
+    // response.credential is a signed ID token, verified server-side in
+    // /auth/google rather than trusted as-is, since anything reaching this
+    // callback came straight from the browser.
+    async function handleGoogleCredential(response) {
+      try {
+        const res = await fetch('/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential: response.credential }),
+        });
+        const data = await res.json();
+        if (data.user) {
+          currentUser = data.user;
+          renderAccountUI();
+          document.getElementById('loginGate').hidden = true;
+        } else {
+          console.error('Google sign-in failed:', data.error);
+        }
+      } catch (err) {
+        console.error('Google sign-in request failed:', err);
+      }
+    }
+
+    async function signOutGoogle() {
+      try {
+        await fetch('/auth/logout', { method: 'POST' });
+      } catch (err) {
+        console.error('Sign-out request failed:', err);
+      }
+      currentUser = null;
+      renderAccountUI();
+      closeMenu();
+      // Back to square one — same gate a first-time visitor sees, not just
+      // the menu's own signed-out state, since staying on the app screen
+      // after signing out would contradict the whole point of gating it.
+      document.getElementById('loginGate').hidden = false;
+      // Otherwise Google's own One Tap/auto-select would just sign the same
+      // account straight back in without actually asking.
+      if (window.google?.accounts?.id) google.accounts.id.disableAutoSelect();
+    }
+
+    // Restores the signed-in state on a fresh page load — the session
+    // cookie itself persists for 30 days across reloads, but the UI still
+    // needs to ask the server what's actually in it (see /auth/me). This is
+    // also what lets a returning visitor skip #loginGate entirely, which
+    // starts visible by default (see its own comment) specifically so
+    // there's no flash of the real app before this resolves.
+    async function restoreSession() {
+      try {
+        const res = await fetch('/auth/me');
+        const data = await res.json();
+        currentUser = data.user;
+      } catch (err) {
+        console.error('Failed to restore session:', err);
+        currentUser = null;
+      }
+      renderAccountUI();
+      document.getElementById('loginGate').hidden = !!currentUser;
+    }
+
+    // The GIS <script> tag (see <head>) loads async — client_id also has to
+    // come from the server (see /config's own comment for why), so this
+    // can't just run inline at parse time. Retries briefly rather than
+    // failing outright if the script hasn't finished loading yet by the
+    // time /config resolves. Renders into both button slots that might be
+    // showing right now — the gate (first-time/signed-out visitors) and the
+    // menu's Account section (defensive fallback; normally unreachable
+    // signed-out once the gate is blocking everything else).
+    async function initGoogleSignIn() {
+      let googleClientId;
+      try {
+        const res = await fetch('/config');
+        ({ googleClientId } = await res.json());
+      } catch (err) {
+        console.error('Failed to load /config:', err);
+        return;
+      }
+      if (!googleClientId) {
+        console.warn('Google sign-in not configured — set GOOGLE_CLIENT_ID in .env');
+        return;
+      }
+      if (!window.google?.accounts?.id) {
+        setTimeout(initGoogleSignIn, 300);
+        return;
+      }
+      google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: handleGoogleCredential,
+        auto_select: true,
+      });
+      google.accounts.id.renderButton(
+        document.getElementById('googleSignInBtnGate'),
+        { theme: 'filled_black', size: 'large', shape: 'pill', width: 260 }
+      );
+      google.accounts.id.renderButton(
+        document.getElementById('googleSignInBtn'),
+        { theme: 'outline', size: 'medium', shape: 'pill', width: 220 }
+      );
+    }
+
+    restoreSession();
+    initGoogleSignIn();
   </script>
 </body>
 

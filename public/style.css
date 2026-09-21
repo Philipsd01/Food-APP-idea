@@ -827,6 +827,13 @@ body {
     border-color: var(--ember-light);
 }
 
+/* Otherwise falls back to the browser's own default placeholder grey
+   instead of the app's palette — same idea as .search-box input's own
+   placeholder rule above. */
+.ask-input::placeholder {
+    color: var(--ink-3);
+}
+
 .ask-btn {
     display: flex;
     align-items: center;
@@ -1027,20 +1034,23 @@ body {
 .side-menu {
     position: fixed;
     top: 0;
-    left: -300px;
+    /* Slides in from the right now, matching the bottom nav's Menu button
+       being the rightmost item — was the left edge, which meant opening it
+       pulled focus the opposite way from where you'd just tapped. */
+    right: -300px;
     width: 280px;
     height: 100%;
     background: var(--paper);
-    border-right: 0.5px solid var(--border);
+    border-left: 0.5px solid var(--border);
     z-index: 1501;
-    transition: left 0.3s ease;
+    transition: right 0.3s ease;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
 }
 
 .side-menu.open {
-    left: 0;
+    right: 0;
 }
 
 .menu-header {
@@ -1201,6 +1211,61 @@ body {
     font-family: var(--mono) !important;
 }
 
+/* ── Account (Google Sign-In — see initGoogleSignIn) ── */
+.google-signin-btn {
+    padding: 10px 16px 14px 44px;
+    display: flex;
+}
+
+.account-profile {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px 14px 44px;
+}
+
+.account-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    object-fit: cover;
+    background: var(--paper-2);
+}
+
+.account-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+
+.account-name {
+    font-size: 13px;
+    color: var(--ink);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.account-email {
+    font-size: 11px;
+    color: var(--ink-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.account-signout {
+    flex-shrink: 0;
+    padding: 6px !important;
+}
+
+.account-signout i {
+    color: var(--ember);
+}
+
 .location-editor {
     padding: 4px 16px 14px 44px;
     cursor: default;
@@ -1308,7 +1373,12 @@ body.dark {
     --ink: #F4EFE3;
     /* FIX: Higher contrast secondary */
     --ink-2: #B5AB97;
-    --ink-3: #6B6358;
+    /* Was #6B6358 — ~2.9:1 against --card-bg (#211C17), well under the
+       ~4.5:1 needed for text, which is why review quotes, the action-button
+       row, and other --ink-3 text (45 usages) all read as blending into
+       dark-mode cards instead of just being deliberately muted. This value
+       gets ~5.4:1 against the same background. */
+    --ink-3: #9A9186;
     /* FIX: Brighter ember for AA contrast on dark stock */
     --ember: #E07A3E;
     --ember-light: #E07A3E;
@@ -1450,7 +1520,7 @@ body.dark .skeleton-line {
 /* Dark side menu */
 body.dark .side-menu {
     background: #1A1612;
-    border-right-color: var(--border);
+    border-left-color: var(--border);
 }
 
 body.dark .menu-header {
@@ -1825,6 +1895,59 @@ body.dark .card-tag.open-now {
     justify-content: center;
 }
 
+/* ── Login gate (see restoreSession/handleGoogleCredential/signOutGoogle) —
+   blocks the whole app until signed in at least once. Above .lightbox
+   (2000) since it has to out-rank literally everything else the app can
+   show, not just the map/sheet tier those already clear. */
+.login-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    background: var(--paper);
+    display: flex;
+    /* Sits in the upper third rather than dead-center — leaves room below
+       for whatever else this screen picks up later (other sign-in options,
+       terms text, etc.) instead of that space feeling arbitrary once
+       something new needs to go there. */
+    align-items: flex-start;
+    justify-content: center;
+    padding: 20vh 24px 24px;
+}
+
+.login-gate[hidden] {
+    display: none;
+}
+
+body.dark .login-gate {
+    background: #14110F;
+}
+
+.login-gate-content {
+    max-width: 320px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.login-gate-subtitle {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink-3);
+    line-height: 1.4;
+    margin: 8px 0 24px;
+}
+
+/* Its own class rather than reusing .google-signin-btn (the menu's Account
+   section) — that one carries a 44px left padding to line up with the
+   menu's icon column, which just threw this off-center instead. Centering
+   here comes from .login-gate-content's own align-items, so this needs no
+   layout properties of its own at all. */
+.login-gate-google-btn {
+    display: flex;
+}
+
 .lightbox.open {
     display: flex;
 }
@@ -1992,7 +2115,13 @@ body.dark .card-tag.open-now {
 
 .sheet-backdrop.open {
     opacity: 1;
-    pointer-events: auto;
+    /* Was pointer-events: auto, with an onclick to dismiss — this backdrop
+       spans the full screen above the nav, not just the area actually
+       behind the sheet, so that also caught every tap on the strip of map
+       deliberately left visible/interactive above it (see openBottomSheet's
+       pan-into-view), closing the whole sheet instead of letting that tap
+       reach the map. Purely a dimming visual now; closing goes through the
+       X button or the drag-down gesture instead. */
 }
 
 .bottom-sheet {
@@ -2293,6 +2422,17 @@ body.dark .card-tag.open-now {
     height: 70vh;
 }
 
+/* Third state (see setResultsSheetState) — Apple Stocks/Maps-style: almost
+   entirely out of the way, just the handle and its "swipe up" chevron
+   showing, reached by dragging the handle down past peek (see
+   setupResultsSheetDrag) rather than a tap. Never fully hidden the way
+   .route-hidden is — the handle stays a visible, tappable affordance,
+   matching the "always at least a peek" rule a real search's list never
+   breaks. */
+.results-sheet.mini {
+    height: 60px;
+}
+
 @media (min-width: 768px) {
     .results-sheet {
         max-width: 800px;
@@ -2315,7 +2455,10 @@ body.dark .card-tag.open-now {
     background: none;
     border: none;
     padding: 10px 0 8px;
-    cursor: pointer;
+    cursor: grab;
+    /* Stops the browser's own touch scroll/zoom gestures from fighting the
+       drag handler (see setupResultsSheetDrag) on touch devices. */
+    touch-action: none;
 }
 
 .results-sheet-arrow {
