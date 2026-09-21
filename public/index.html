@@ -126,15 +126,6 @@
   </div>
 
   <div class="container">
-    <div class="top-bar">
-      <button class="hamburger" onclick="openMenu()">
-        <i class="ti ti-menu-2"></i>
-      </button>
-      <button class="hamburger" id="navMapTop" onclick="browseNearbyOnMap()" title="Browse nearby on the map">
-        <i class="ti ti-map-2 map-nav-icon"></i>
-      </button>
-    </div>
-
     <div class="header-decor" id="headerDecor">
       <p class="header-label">discover</p>
       <p class="header-title">Search smarter, eat better</p>
@@ -238,10 +229,8 @@
     </button>
   </div>
 
-  <!-- Comparison alternative to the top-bar hamburger + map-pin — same four
-       destinations (Home, Map, Saved, Menu), just laid out as a bottom tab
-       bar instead. Nothing above was removed so the two can be judged side
-       by side; see bottomNav's CSS to hide one or the other. -->
+  <!-- Sole navigation now — the old top-bar hamburger + map-pin was removed
+       in favor of this bottom tab bar (Home, Map, Saved, Menu). -->
   <div class="bottom-nav" id="bottomNav">
     <button class="bottom-nav-btn" id="navHome" onclick="resetSearch()" title="Home">
       <i class="ti ti-home"></i>
@@ -298,13 +287,13 @@
     // summary, so map popups and the list toggle adapt accordingly.
     let browseMode = false;
     // Index of whichever marker's popup is currently open on the map, if
-    // any — lets the bottom-nav/top-bar List toggle jump straight to the
+    // any — lets the bottom-nav's List toggle jump straight to the
     // restaurant someone is actually looking at right now, instead of
     // falling back to whatever was last deep-dived (or nothing).
     let activeMapIndex = null;
     // Whether the real-search results sheet (see setResultsSheetState) is
-    // expanded to show the full ranked list, or just peeking — it's never
-    // fully closed the way the single-restaurant sheet can be.
+    // expanded to show the full ranked list, or just peeking — never fully
+    // closed on its own (see the .route-hidden class for the one exception).
     let resultsSheetFull = false;
 
     // Every restaurant name, review, and AI-generated description ultimately
@@ -1316,19 +1305,16 @@
       const previousQuery = lastQuery || null;
 
       resultsBox.innerHTML = "";
+      // A compact spinner instead of full skeleton cards — this sits in the
+      // sheet's peek state (~190px) while we wait, so nothing has to jump
+      // straight to full height before there's anything real to show. The
+      // sheet only expands to 'full' once actual results land (see below),
+      // which reads as the list sliding up to reveal itself instead of the
+      // whole sheet popping open around an empty shell.
       loading.innerHTML = `
-        <p class="loading-status" id="loadingStatus"></p>
-        <div class="skeleton-card">
-          <div class="skeleton-line title"></div>
-          <div class="skeleton-line tags"></div>
-          <div class="skeleton-line text1"></div>
-          <div class="skeleton-line text2"></div>
-        </div>
-        <div class="skeleton-card">
-          <div class="skeleton-line title"></div>
-          <div class="skeleton-line tags"></div>
-          <div class="skeleton-line text1"></div>
-          <div class="skeleton-line text2"></div>
+        <div class="loading-compact">
+          <div class="loading-spinner"></div>
+          <p class="loading-status" id="loadingStatus"></p>
         </div>`;
       isLoading = true;
       loading.style.display = "block";
@@ -1336,11 +1322,10 @@
       // The map is the backdrop from the moment a search starts, not just
       // once results arrive — showing it immediately (centered on wherever
       // the user already is, no pins yet) reads as "already working on it"
-      // instead of the map only appearing once everything's ready. The
-      // results sheet opens to 'full' now too, for the skeleton to sit in.
+      // instead of the map only appearing once everything's ready.
       switchView();
       document.getElementById('resultsSheet').hidden = false;
-      setResultsSheetState('full');
+      setResultsSheetState('peek');
 
       startProgressMessages(query, currentAnalysis);
 
@@ -1388,6 +1373,10 @@
 
         currentResults = data.results;
         renderResults(currentResults);
+        // Expands the sheet now that there's real content sitting inside it
+        // — the height transition (see .results-sheet.full) animates the
+        // reveal instead of the list just appearing at full size.
+        setResultsSheetState('full');
 
         // "Directions to X" means the user already knows where they're
         // going — skip making them tap into the list and hit Directions
@@ -1668,9 +1657,9 @@
     function switchView() {
       const mapEl = document.getElementById('mapView');
       mapEl.style.display = 'block';
-      // Not needed once you're actually looking at a map — hiding it frees
-      // up the space it was taking, same reasoning as the old list/map
-      // toggle's "map mode" used to have.
+      // The slogan is a pitch for "search smarter" — once you're looking at
+      // the map you're past that, so it just costs vertical space here.
+      // Hidden to keep the map itself as the dominant element on screen.
       document.getElementById('headerDecor').style.display = 'none';
       resizeMapToFill();
       // 'nearest' only scrolls if the map isn't already visible, instead of
@@ -1692,6 +1681,21 @@
     // present or not, bottom nav on or off). Safe to call any time the map
     // is visible; a no-op in spirit (just recomputes the same thing) when
     // nothing's actually changed.
+    // --bottom-nav-h (see :root) started as a hardcoded guess at the nav's
+    // rendered height, which was consistently a few px off from reality
+    // (icon/font line-height rounding) — every fixed panel anchored to it
+    // (route panel, results sheet, bottom sheet) inherited that same small
+    // gap or overlap above the nav. Measuring the real element instead
+    // makes all of them line up exactly, and self-corrects if the nav's
+    // own CSS ever changes.
+    function syncBottomNavHeight() {
+      const bottomNav = document.getElementById('bottomNav');
+      if (bottomNav) {
+        document.documentElement.style.setProperty('--bottom-nav-h', `${bottomNav.offsetHeight}px`);
+      }
+    }
+    syncBottomNavHeight();
+
     function resizeMapToFill() {
       const mapEl = document.getElementById('mapView');
       const top = mapEl.getBoundingClientRect().top;
@@ -1702,6 +1706,7 @@
     }
 
     window.addEventListener('resize', () => {
+      syncBottomNavHeight();
       if (document.getElementById('mapView').style.display === 'block') {
         resizeMapToFill();
         map && map.invalidateSize();
@@ -1921,6 +1926,13 @@
         map = L.map(mapEl, { zoomControl: false }).setView(initialCenter, 15);
         L.control.zoom({ position: 'bottomright' }).addTo(map);
         map.on('zoomend', updateMarkerLabelVisibility);
+        // Tapping empty map — not a marker, Leaflet doesn't bubble those
+        // clicks up to the map itself — collapses an open results sheet
+        // back to peek, Google-Maps-style, so there's always an easy way
+        // back to the map without needing "Show on map" inside a card.
+        map.on('click', () => {
+          if (!browseMode && resultsSheetFull) setResultsSheetState('peek');
+        });
       } else {
         markers.forEach(m => m.remove());
         markers = [];
@@ -2059,11 +2071,16 @@
       // A route drawn on the map means nothing if a sheet is still covering
       // most of it — this is what "Directions doesn't work" from inside the
       // single-restaurant sheet actually was: the route WAS drawing, just
-      // entirely hidden behind still-open sheet content. Both calls are
-      // harmless no-ops in whichever context doesn't apply (browse mode's
-      // sheet vs. a real search's results sheet are mutually exclusive).
+      // entirely hidden behind still-open sheet content. closeBottomSheet is
+      // a harmless no-op outside browse mode (browse mode's sheet vs. a real
+      // search's results sheet are mutually exclusive). The results sheet
+      // slides itself fully out of view (see .route-hidden) rather than just
+      // collapsing to peek — directions is a focused, single-restaurant
+      // view, and a cropped peek of the list next to it was just noise. The
+      // class toggle alone is a no-op if the sheet was already hidden (e.g.
+      // browse mode), so nothing extra needs tracking for the restore.
       closeBottomSheet();
-      setResultsSheetState('peek');
+      document.getElementById('resultsSheet').classList.add('route-hidden');
 
       routeTargetIndex = index;
       if (mode) routeMode = mode;
@@ -2146,6 +2163,10 @@
       if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
       routeTargetIndex = null;
       document.getElementById('routePanel').hidden = true;
+      // Slides the results sheet back into view exactly as it was (still
+      // peek or full, whichever it last was) — a no-op if it was never
+      // shown to begin with (e.g. browse mode).
+      document.getElementById('resultsSheet').classList.remove('route-hidden');
       // Bring back whichever markers showRouteOnMap hid to isolate the
       // route — they were only removed from the map layer, never destroyed.
       if (map) markers.forEach(m => { if (m && !map.hasLayer(m)) m.addTo(map); });

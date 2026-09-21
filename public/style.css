@@ -22,9 +22,10 @@
     --serif: 'Playfair Display', Georgia, serif;
     --sans: 'DM Sans', -apple-system, sans-serif;
     --mono: 'DM Mono', monospace;
-    /* Approximate .bottom-nav content height, excluding its own safe-area
-       padding (added separately wherever this is used) — a shared number
-       so the bottom sheet can stop exactly above it instead of covering it. */
+    /* Fallback only — overwritten with #bottomNav's real measured height
+       (including its own safe-area padding) by syncBottomNavHeight() on
+       load/resize, so every fixed panel that stops above the nav lines up
+       exactly instead of leaving an approximation gap. */
     --bottom-nav-h: 64px;
 
     /* Light mode chip states */
@@ -42,17 +43,20 @@ body {
     min-height: 100vh;
 }
 
-/* ── Container ── */
+/* ── Container ──
+   Top padding trimmed since the top-bar (hamburger + map-pin) was removed
+   in favor of the bottom nav — without it, the old padding left the
+   header sitting in an empty gap at the top of the screen. */
 .container {
     max-width: 480px;
     margin: 0 auto;
-    padding: 16px 20px 40px;
+    padding: 32px 20px 40px;
 }
 
 @media (min-width: 768px) {
     .container {
         max-width: 800px;
-        padding: 24px;
+        padding: 40px 24px 24px;
     }
 
     .results {
@@ -69,49 +73,8 @@ body {
 @media (min-width: 1024px) {
     .container {
         max-width: 960px;
-        padding: 32px;
+        padding: 48px 32px 32px;
     }
-}
-
-.top-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 20px 4px;
-    margin-bottom: 4px;
-    position: sticky;
-    top: 0;
-    z-index: 11;
-    background: var(--paper);
-    margin-left: -20px;
-    margin-right: -20px;
-    padding: 10px 20px;
-}
-
-body.dark .top-bar {
-    background: #14110F;
-}
-
-.hamburger {
-    background: var(--paper-2);
-    border: 0.5px solid var(--border);
-    border-radius: 10px;
-    width: 38px;
-    height: 38px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-.hamburger i {
-    font-size: 18px;
-    color: var(--ink-2);
-}
-
-.hamburger:hover {
-    background: var(--border);
 }
 
 /* ── Header ── */
@@ -930,6 +893,36 @@ body.dark .top-bar {
     margin-bottom: 12px;
 }
 
+/* Sits in the results sheet's compact peek state while a search is in
+   flight — no room (or need) for full skeleton cards at that height. */
+.loading-compact {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 0 8px;
+}
+
+.loading-compact .loading-status {
+    margin-bottom: 0;
+}
+
+.loading-spinner {
+    width: 22px;
+    height: 22px;
+    border: 2.5px solid var(--border);
+    border-top-color: var(--ember);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-bottom: 10px;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .error {
     text-align: center;
     color: var(--ember);
@@ -1473,15 +1466,6 @@ body.dark .menu-footer {
     border-top-color: var(--border);
 }
 
-body.dark .hamburger {
-    background: #211C17;
-    border-color: var(--border);
-}
-
-body.dark .hamburger:hover {
-    background: #2A2520;
-}
-
 /* Dark no-results */
 body.dark .no-results {
     background: var(--card-bg);
@@ -1936,7 +1920,11 @@ body.dark .card-tag.open-now {
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 12;
+    /* Above the sheets/route-panel tier (~1080-1090, see below) so a sheet
+       sliding fully open/closed passes behind the nav instead of over it —
+       still well under the side-menu tier (1500+) so opening the menu still
+       covers the nav, not the other way around. */
+    z-index: 1095;
     display: flex;
     justify-content: space-around;
     background: var(--paper-2);
@@ -1983,16 +1971,20 @@ body.dark .card-tag.open-now {
     right: 0;
     /* Stops above the bottom nav instead of covering it — same idea as
        Spotify's mini-player or a shopping app's "add to cart" sheet,
-       primary navigation stays reachable while this is open. */
-    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
+       primary navigation stays reachable while this is open. --bottom-nav-h
+       already includes the nav's own safe-area padding (see :root), so it
+       isn't added again here. */
+    bottom: var(--bottom-nav-h);
     background: rgba(0, 0, 0, 0.35);
     /* Leaflet's own panes/controls sit at z-index up to ~1000 inside
        #mapView, which has no z-index of its own to trap them below this —
        so this has to clear that (same reasoning as .menu-overlay above)
        to actually appear in front of the map instead of behind its tiles/
-       markers/zoom control. Still under .lightbox (2000) so a photo tapped
-       from inside the sheet can open on top of it. */
-    z-index: 1550;
+       markers/zoom control. Below .bottom-nav (1095, see above) so the
+       sheet's own open/close slide passes behind the nav instead of over
+       it. Still under .lightbox (2000) so a photo tapped from inside the
+       sheet can open on top of it. */
+    z-index: 1080;
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.25s ease;
@@ -2012,7 +2004,10 @@ body.dark .card-tag.open-now {
        height — see .bottom-sheet.open for where the nav gap actually gets
        applied instead. */
     bottom: 0;
-    z-index: 1551;
+    /* Below .bottom-nav (1095) so this slides behind the nav on open/close
+       instead of over it — see .sheet-backdrop above for the same reasoning
+       against Leaflet's own z-index (~1000). */
+    z-index: 1081;
     max-width: 480px;
     margin: 0 auto;
     /* Was 85vh — started too close to the very top of the screen, barely
@@ -2050,8 +2045,9 @@ body.dark .card-tag.open-now {
     /* Pulls the box up from its true-bottom anchor by exactly the nav's
        height instead of repositioning `bottom` itself — this is what
        actually keeps it clear of the nav while open, without touching the
-       closed-state math above. */
-    transform: translateY(calc(-1 * (var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px))));
+       closed-state math above. --bottom-nav-h already includes the nav's
+       own safe-area padding (see :root). */
+    transform: translateY(calc(-1 * var(--bottom-nav-h)));
 }
 
 .sheet-handle-row {
@@ -2106,11 +2102,15 @@ body.dark .card-tag.open-now {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
-    /* Same tier as the bottom sheet, same reason — Leaflet's own panes and
-       controls inside #mapView sit at z-index up to ~1000, and #mapView
-       itself has no z-index to trap them below this. */
-    z-index: 1551;
+    /* --bottom-nav-h already includes the nav's own safe-area padding (see
+       :root), so it isn't added again here. */
+    bottom: var(--bottom-nav-h);
+    /* Above the results sheet's tier (1082, see below) so the sheet sliding
+       shut behind it (see .route-hidden) actually passes behind this panel
+       instead of over it — still below .bottom-nav (1095) and clear of
+       Leaflet's own panes/controls (~1000, #mapView has no z-index of its
+       own to trap them below this). */
+    z-index: 1090;
     max-width: 480px;
     margin: 0 auto;
     display: flex;
@@ -2225,8 +2225,33 @@ body.dark .card-tag.open-now {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
-    z-index: 1551;
+    /* Anchored at the true screen bottom, not above the nav — same fix as
+       .bottom-sheet.open below: translateY(100%) only clears the viewport
+       reliably when it's measured from a bottom:0 anchor. Anchoring above
+       the nav instead (bottom: var(--bottom-nav-h)) meant sliding "down 100%"
+       only returned it to that anchor line, landing exactly on top of the
+       nav instead of below the screen — see .route-hidden. */
+    bottom: 0;
+    /* Lifts the resting (visible) sheet up clear of the nav — --bottom-nav-h
+       already includes the nav's own safe-area padding (see :root). */
+    transform: translateY(calc(-1 * var(--bottom-nav-h)));
+    /* transform runs longer than height — same 0.3s duration made the
+       directions slide *feel* faster than the peek/full toggle even though
+       the timing was identical, because it covers a much longer distance
+       (full sheet height plus the nav lift, vs. just the peek-to-full
+       height delta) in the same window. Slowing it down brings the two
+       back to a similar apparent speed. */
+    transition: height 0.3s cubic-bezier(0.32, 0.72, 0, 1), transform 0.45s cubic-bezier(0.32, 0.72, 0, 1);
+    /* Below .route-panel (1090) and .bottom-nav (1095) so the slide behind
+       both (see .route-hidden) is a constant, not something toggled at
+       transition time — a dynamic z-index drop turned out to be the bug
+       that made the slide look instant: dropping this low enough to clear
+       the nav (z:12) also dropped it below Leaflet's own panes (~1000),
+       which are opaque, so the sheet vanished behind the map itself well
+       before it had visibly moved anywhere. Still clear of Leaflet's own
+       panes/controls (~1000, #mapView has no z-index of its own to trap
+       them below this). */
+    z-index: 1082;
     max-width: 480px;
     margin: 0 auto;
     display: flex;
@@ -2239,7 +2264,6 @@ body.dark .card-tag.open-now {
        is what invites dragging/tapping it open rather than it looking like
        the full list already. */
     height: 190px;
-    transition: height 0.3s cubic-bezier(0.32, 0.72, 0, 1);
     overflow: hidden;
 }
 
@@ -2247,8 +2271,26 @@ body.dark .card-tag.open-now {
     display: none;
 }
 
+/* Directions is showing (see showRouteOnMap/clearRoute) — slides the sheet
+   the rest of the way down and out of view instead of an instant hide, same
+   motion language as the peek/full height transition above. Overrides the
+   base rule's transform entirely (not additive), so from the bottom:0
+   anchor this always clears the full viewport regardless of which height
+   state (peek or full) it's currently in — same reasoning as .bottom-sheet's
+   closed state. Passes behind both the route panel and the nav on the way
+   down/up since this sheet's z-index sits below both of theirs at all times
+   (see .results-sheet above) — nothing to toggle here. */
+.results-sheet.route-hidden {
+    transform: translateY(100%);
+    pointer-events: none;
+}
+
 .results-sheet.full {
-    height: 85vh;
+    /* Short of a full 85vh on purpose — leaves a visible strip of map at
+       the top even at "full", as a standing reminder you can tap it (or
+       the handle) to get back to the map instead of the list ever fully
+       swallowing the screen. */
+    height: 70vh;
 }
 
 @media (min-width: 768px) {
