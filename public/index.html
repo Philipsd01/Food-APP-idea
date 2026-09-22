@@ -101,17 +101,12 @@
       </div>
     </div>
 
-    <div class="menu-section" id="savedSection">
-      <div class="menu-section-label" onclick="toggleSection(this)">
-        <i class="ti ti-heart"></i>
-        <span>Saved Restaurants</span>
-        <i class="ti ti-chevron-down section-arrow"></i>
-      </div>
-      <div class="menu-section-items" id="savedRestaurantsList">
-        <div class="menu-item">
-          <span>No saved restaurants yet</span>
-        </div>
-      </div>
+    <!-- Saved restaurants moved to their own page (see #savedView) — this
+         is just an entry point into it now, not a duplicate list to keep in
+         sync with that page's categories. -->
+    <div class="menu-item" onclick="closeMenu(); openSavedSection();">
+      <i class="ti ti-heart"></i>
+      <span>Saved Restaurants</span>
     </div>
 
     <div class="menu-section">
@@ -201,6 +196,56 @@
   </div>
   </div>
 
+  <!-- Dedicated Saved page (see openSavedSection/showSavedView) — its own
+       destination alongside Home/Map now that saved restaurants have
+       categories worth browsing by, instead of a flat list buried in a
+       collapsed menu section. A full opaque overlay (like the menu/lightbox)
+       rather than living inside .container — simplest way to give it its
+       own layout without fighting the home screen's header/search box. -->
+  <div class="saved-view" id="savedView" hidden>
+    <div class="saved-view-header">
+      <p class="saved-view-title">Saved</p>
+    </div>
+    <div class="saved-categories-row" id="savedCategoriesRow"></div>
+    <div class="saved-toolbar" id="savedToolbar">
+      <div class="saved-sort-row" id="savedSortRow"></div>
+      <button class="saved-map-toggle" id="savedMapToggle" onclick="toggleSavedMiniMap()" title="Show on map">
+        <i class="ti ti-map-2"></i>
+      </button>
+    </div>
+    <div class="saved-mini-map-wrap" id="savedMiniMapWrap" style="display: none;">
+      <div class="saved-mini-map" id="savedMiniMap"></div>
+    </div>
+    <div class="saved-view-list" id="savedViewList"></div>
+  </div>
+
+  <!-- Category picker (see openSaveCategoryPicker) — shown when saving a
+       restaurant that isn't already saved, so "save" always means "save
+       into something" (Liked, or one of your own categories) instead of a
+       plain unsorted heap. Unsaving skips this entirely (see
+       handleSaveHeartClick) — no need to re-pick anything just to remove. -->
+  <div class="save-picker-overlay" id="savePickerOverlay" onclick="if (event.target === this) closeSaveCategoryPicker()">
+    <div class="save-picker-card">
+      <p class="save-picker-title">Save to…</p>
+      <div class="save-picker-options" id="savePickerOptions"></div>
+      <button class="save-picker-new-btn" onclick="promptAddCategoryForSave()">
+        <i class="ti ti-plus"></i> New category
+      </button>
+    </div>
+  </div>
+
+  <!-- Per-saved-item note + personal rating (see openSavedEditor) — your
+       own take on a place, separate from Google's rating, editable without
+       leaving the Saved page. -->
+  <div class="save-picker-overlay" id="savedEditOverlay" onclick="if (event.target === this) closeSavedEditor()">
+    <div class="save-picker-card">
+      <p class="save-picker-title" id="savedEditTitle">Your notes</p>
+      <div class="saved-edit-stars" id="savedEditStars"></div>
+      <textarea class="saved-edit-note" id="savedEditNote" placeholder="Anything worth remembering — a dish, a table, next time…" rows="3"></textarea>
+      <button class="save-picker-new-btn saved-edit-save" onclick="saveSavedEdit()">Save</button>
+    </div>
+  </div>
+
   <!-- A real search's ranked matches, as a sheet over the always-visible
        map instead of a separate full-page list — same reasoning as the
        single-restaurant sheet, but this one is never fully dismissible
@@ -228,11 +273,12 @@
        still-visible map, Google Maps/Airbnb-style, instead of navigating
        away to a separate list screen — so there's no List/Map toggle
        button involved in viewing one place at all. -->
-  <!-- No onclick dismiss here (see .sheet-backdrop.open's own comment) —
-       this spans the full screen above the nav, not just the area behind
-       the sheet, which would swallow taps on the visible map strip above
-       it too. Closing goes through the X button or the drag-down gesture. -->
-  <div class="sheet-backdrop" id="sheetBackdrop"></div>
+  <!-- onclick only actually fires while .blocking is applied (see
+       openBottomSheet/handleSheetBackdropTap) — otherwise pointer-events:
+       none lets this pass taps straight through to the map's own visible
+       strip above the sheet, same reasoning as before (see
+       .sheet-backdrop.open's own comment). -->
+  <div class="sheet-backdrop" id="sheetBackdrop" onclick="handleSheetBackdropTap()"></div>
   <div class="bottom-sheet" id="bottomSheet">
     <div class="sheet-handle-row" id="sheetHandleRow">
       <div class="sheet-handle"></div>
@@ -808,8 +854,21 @@
       // the moment someone taps it open, instead of a visible pop-in delay
       // right as the gallery reveals.
       loadExtraPhotos(index);
-      document.getElementById('bottomSheet').classList.add('open');
-      document.getElementById('sheetBackdrop').classList.add('open');
+      // Full, not peek — tapping "View details" is a deliberate request to
+      // actually see the restaurant, not a glance, so it should open at the
+      // size that's actually the point of opening it at all. Dragging or
+      // tapping the handle afterward still moves freely between all three.
+      setBottomSheetState('full');
+      // The map strip left visible above the sheet is deliberately still
+      // interactive (pan/tap markers) — see .sheet-backdrop's own comment.
+      // The Saved page has no such reason to stay interactive behind the
+      // sheet (tapping a different saved card under it isn't "browsing a
+      // map," it's just an accidental background tap) — this makes the
+      // backdrop actually catch those taps and collapse to mini instead of
+      // letting them silently reach whatever's underneath, same outcome as
+      // tapping empty map already gets you (see the map's own click
+      // handler in initMap).
+      document.getElementById('sheetBackdrop').classList.toggle('blocking', !document.getElementById('savedView').hidden);
       const marker = markers[index];
       if (marker && marker.isPopupOpen()) marker.closePopup();
       // Nudges the marker into the strip of map that stays visible above
@@ -834,50 +893,92 @@
     }
 
     function closeBottomSheet() {
-      document.getElementById('bottomSheet').classList.remove('open');
-      document.getElementById('sheetBackdrop').classList.remove('open');
+      setBottomSheetState('closed');
       document.getElementById('bottomSheet').style.transform = '';
+      document.getElementById('sheetBackdrop').classList.remove('blocking');
       singleCardIndex = null;
+    }
+
+    // Backdrop tap while it's actively blocking (see openBottomSheet) —
+    // same "collapse to mini, don't close outright" behavior tapping the
+    // map itself already gets.
+    function handleSheetBackdropTap() {
+      if (bottomSheetState !== 'mini') setBottomSheetState('mini');
     }
 
     // Swipe-down-to-dismiss on the handle — the close button alone works,
     // but a draggable handle is what actually sells the "this is a physical
     // sheet sitting over the map" feel the whole prototype is testing.
     // Pointer events cover touch and mouse alike, one listener set for both.
+    let bottomSheetState = 'closed'; // 'closed' | 'mini' | 'peek' | 'full'
+
+    function setBottomSheetState(state) {
+      const sheet = document.getElementById('bottomSheet');
+      bottomSheetState = state;
+      sheet.style.height = ''; // clear any inline height a drag left behind
+      sheet.classList.toggle('mini', state === 'mini');
+      sheet.classList.toggle('peek', state === 'peek');
+      sheet.classList.toggle('full', state === 'full');
+      // Backdrop only dims once there's enough sheet to actually cover the
+      // map — at mini, the map underneath should stay fully interactive.
+      document.getElementById('sheetBackdrop').classList.toggle(
+        'open', state === 'peek' || state === 'full'
+      );
+    }
+
+    // Same drag-to-nearest pattern as setupResultsSheetDrag, applied to the
+    // single-restaurant sheet: clamped so it can never drag past 'mini' into
+    // nothing, and a small movement counts as a tap (toggle peek<->full)
+    // rather than a drag.
     (function setupSheetDrag() {
       const sheet = document.getElementById('bottomSheet');
       const handle = document.getElementById('sheetHandleRow');
-      let startY = 0, dragY = 0, baseOffsetY = 0, dragging = false;
+      const MINI_H = 40, PEEK_H = 280; // MINI_H matches .bottom-sheet.mini in style.css
+      const TAP_THRESHOLD_PX = 8;
+      let startY = 0, startHeight = 0, dragging = false, maxMove = 0;
+
+      function fullHeight() {
+        return window.innerHeight * 0.76;
+      }
 
       handle.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('.sheet-close-btn')) return; // let the X button work normally
         dragging = true;
+        maxMove = 0;
         startY = e.clientY;
-        dragY = 0;
-        // The sheet's resting "open" position isn't translateY(0) — it's
-        // pulled up by the bottom-nav's height (see .bottom-sheet.open) —
-        // so the drag has to add its offset on top of whatever that
-        // actually computes to right now, not overwrite it, or the sheet
-        // would visibly jump down by that amount the instant a drag starts.
-        const matrix = new DOMMatrixReadOnly(getComputedStyle(sheet).transform);
-        baseOffsetY = matrix.m42;
+        startHeight = sheet.getBoundingClientRect().height;
         sheet.style.transition = 'none';
         handle.setPointerCapture(e.pointerId);
       });
+
       handle.addEventListener('pointermove', (e) => {
         if (!dragging) return;
-        dragY = Math.max(0, e.clientY - startY);
-        sheet.style.transform = `translateY(${baseOffsetY + dragY}px)`;
+        const delta = startY - e.clientY; // dragging up grows the sheet
+        maxMove = Math.max(maxMove, Math.abs(delta));
+        const next = Math.max(MINI_H, Math.min(fullHeight(), startHeight + delta));
+        sheet.style.height = `${next}px`;
       });
-      const endDrag = () => {
+
+      function endDrag() {
         if (!dragging) return;
         dragging = false;
         sheet.style.transition = '';
-        // Past a quarter of the sheet's own height, treat it as a real
-        // dismiss gesture rather than a small nudge — otherwise snap back
-        // open instead of leaving it stuck half-dragged.
-        if (dragY > sheet.offsetHeight * 0.25) closeBottomSheet();
-        else sheet.style.transform = '';
-      };
+        if (maxMove < TAP_THRESHOLD_PX) {
+          sheet.style.height = '';
+          // Not peek — tapping the handle to collapse should match tapping
+          // the map to collapse (see the map click handler), both dropping
+          // all the way to mini. Same fix already applied to the results
+          // sheet's own tap branch.
+          setBottomSheetState(bottomSheetState === 'full' ? 'mini' : 'full');
+          return;
+        }
+        const h = sheet.getBoundingClientRect().height;
+        const full = fullHeight();
+        const distances = { mini: Math.abs(h - MINI_H), peek: Math.abs(h - PEEK_H), full: Math.abs(h - full) };
+        const nearest = Object.keys(distances).reduce((a, b) => distances[a] <= distances[b] ? a : b);
+        setBottomSheetState(nearest);
+      }
+
       handle.addEventListener('pointerup', endDrag);
       handle.addEventListener('pointercancel', endDrag);
     })();
@@ -1074,6 +1175,7 @@
       // own browser, so Google localizes it without us needing to embed
       // an address in the query.
       actionsHtml += `<a class="card-map-btn" href="https://www.google.com/search?q=${encodeURIComponent(r.name + " menu")}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-book-2"></i> Menu</a>`;
+      actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); shareRestaurant(${index})"><i class="ti ti-share-2"></i> Share</button>`;
 
       // JS-string-escape first (for the single-quoted argument inside
       // onclick), then HTML-escape the result (for the double-quoted
@@ -1124,7 +1226,7 @@
           <div class="card-header">
             <span class="card-name">${safeName}</span>
             <div class="card-header-right">
-              <button class="save-heart-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveRestaurant('${escapedName}', this)" title="${isSaved ? 'Remove from saved' : 'Save'}">
+              <button class="save-heart-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); handleSaveHeartClick(${index}, this)" title="${isSaved ? 'Remove from saved' : 'Save'}">
                 <i class="ti ti-heart${isSaved ? '-filled' : ''}"></i>
               </button>
               ${hasScore ? `<span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${escapeHtml(scoreHint(r.score))}"` : ''}>${label}</span>` : ''}
@@ -1485,6 +1587,10 @@
     }
 
     function openMenu() {
+      // Same reasoning as showSavedView — Menu is a bottom-nav destination
+      // too, so a single-restaurant sheet left open from wherever you were
+      // shouldn't persist underneath it.
+      closeBottomSheet();
       document.getElementById("sideMenu").classList.add("open");
       document.getElementById("menuOverlay").classList.add("open");
     }
@@ -1494,19 +1600,15 @@
       document.getElementById("menuOverlay").classList.remove("open");
     }
 
-    // Bottom-nav "Saved" shortcut — opens straight into the Saved
-    // Restaurants section instead of dropping someone into a collapsed
-    // menu they then have to know to expand themselves.
+    // Bottom-nav "Saved" shortcut — its own full page now (see #savedView),
+    // not a collapsed menu section, now that there are categories worth
+    // browsing by.
     function openSavedSection() {
-      openMenu();
-      const section = document.getElementById("savedSection");
-      if (section) {
-        section.classList.add("open");
-        section.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      showSavedView();
     }
 
     function resetSearch() {
+      hideSavedView();
       currentAnalysis = null;
       lastQuery = "";
       browseMode = false;
@@ -1616,7 +1718,14 @@
 
     function loadSavedRestaurants() {
       try {
-        return JSON.parse(localStorage.getItem(SAVED_RESTAURANTS_KEY) || "[]");
+        const list = JSON.parse(localStorage.getItem(SAVED_RESTAURANTS_KEY) || "[]");
+        // Anything saved before categories existed has no categoryId —
+        // backfill it into Liked once, rather than treating "uncategorized"
+        // as a fourth state the rest of the saved page has to account for.
+        let migrated = false;
+        list.forEach(r => { if (!r.categoryId) { r.categoryId = "liked"; migrated = true; } });
+        if (migrated) localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(list));
+        return list;
       } catch (e) {
         return [];
       }
@@ -1626,30 +1735,184 @@
       return loadSavedRestaurants().some(r => r.name === name);
     }
 
+    // --- Saved categories ("Want to go", "Been there", ... — plus the
+    // always-present "Liked" catch-all) — a second small localStorage
+    // table alongside SAVED_RESTAURANTS_KEY, referenced by each saved
+    // restaurant's categoryId. ---
+
+    const SAVED_CATEGORIES_KEY = "savedCategories";
+
+    // Liked is the "just liked, didn't feel like categorizing" option (see
+    // openSaveCategoryPicker) — always first, never deletable (see
+    // deleteCategory). Want to go/Been there are just starter suggestions
+    // so the picker isn't empty on a first visit; freely deletable.
+    function loadSavedCategories() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(SAVED_CATEGORIES_KEY) || "null");
+        if (Array.isArray(raw) && raw.length > 0) return raw;
+      } catch (e) { /* fall through to defaults */ }
+      const defaults = [
+        { id: "liked", name: "Liked" },
+        { id: "want-to-go", name: "Want to go" },
+        { id: "been-there", name: "Been there" },
+      ];
+      localStorage.setItem(SAVED_CATEGORIES_KEY, JSON.stringify(defaults));
+      return defaults;
+    }
+
+    function saveCategoriesList(categories) {
+      localStorage.setItem(SAVED_CATEGORIES_KEY, JSON.stringify(categories));
+    }
+
+    function createCategory(name) {
+      const trimmed = (name || "").trim();
+      if (!trimmed) return null;
+      const categories = loadSavedCategories();
+      const category = { id: `cat-${Date.now().toString(36)}`, name: trimmed };
+      categories.push(category);
+      saveCategoriesList(categories);
+      return category;
+    }
+
+    // Deleting a category doesn't delete what's in it — those restaurants
+    // just fall back to Liked, same as anything saved before categories
+    // existed (see the migration in loadSavedRestaurants).
+    function deleteCategory(id) {
+      if (id === "liked") return;
+      const categories = loadSavedCategories();
+      const category = categories.find(c => c.id === id);
+      if (!category) return;
+      if (!window.confirm(`Delete "${category.name}"? Restaurants in it move to Liked.`)) return;
+      saveCategoriesList(categories.filter(c => c.id !== id));
+      const items = loadSavedRestaurants();
+      items.forEach(r => { if (r.categoryId === id) r.categoryId = "liked"; });
+      localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(items));
+      if (activeSavedCategoryId === id) activeSavedCategoryId = "all";
+      renderSavedView();
+    }
+
+    // Which restaurant is mid-save (heart tapped, category picker open) —
+    // the picker itself has no restaurant context of its own, just whatever
+    // was tapped last.
+    let pendingSaveIndex = null;
+    let pendingSaveBtn = null;
+
+    // Unsaving is instant (no picker) — the category choice only matters
+    // going in. Saving a not-yet-saved restaurant always goes through the
+    // picker (see openSaveCategoryPicker) so "save" means "save into
+    // something," even if that something is just Liked.
+    function handleSaveHeartClick(index, btnEl) {
+      const r = currentResults[index];
+      if (!r) return;
+      if (isRestaurantSaved(r.name)) {
+        btnEl.classList.remove("saved");
+        btnEl.querySelector("i").className = "ti ti-heart";
+        unsaveRestaurant(r.name);
+        return;
+      }
+      pendingSaveIndex = index;
+      pendingSaveBtn = btnEl;
+      renderSavePickerOptions();
+      document.getElementById("savePickerOverlay").classList.add("open");
+    }
+
+    function closeSaveCategoryPicker() {
+      document.getElementById("savePickerOverlay").classList.remove("open");
+      pendingSaveIndex = null;
+      pendingSaveBtn = null;
+    }
+
+    function renderSavePickerOptions() {
+      const el = document.getElementById("savePickerOptions");
+      if (!el) return;
+      el.innerHTML = loadSavedCategories().map(c =>
+        `<button class="save-picker-option" onclick="saveRestaurantToCategory('${c.id}')">${escapeHtml(c.name)}</button>`
+      ).join("");
+    }
+
+    function promptAddCategoryForSave() {
+      const category = createCategory(window.prompt('New category name (e.g. "Want to go")'));
+      if (category) saveRestaurantToCategory(category.id);
+    }
+
     // Stores the full result object so the saved list has enough to act on
     // (directions, website) without needing the original search around —
     // note distance_km/open_now are frozen at save time and can go stale.
-    function toggleSaveRestaurant(name, btnEl) {
-      let saved = loadSavedRestaurants();
-      const idx = saved.findIndex(s => s.name === name);
-      const nowSaved = idx < 0;
-      if (idx >= 0) {
-        saved.splice(idx, 1);
-      } else {
-        const r = currentResults.find(x => x.name === name);
-        if (r) saved.unshift({ ...r, savedAt: Date.now() });
-      }
+    function saveRestaurantToCategory(categoryId) {
+      const index = pendingSaveIndex;
+      const btnEl = pendingSaveBtn;
+      closeSaveCategoryPicker();
+      const r = currentResults[index];
+      if (!r || isRestaurantSaved(r.name)) return;
+      const saved = loadSavedRestaurants();
+      saved.unshift({ ...r, savedAt: Date.now(), categoryId });
       localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(saved));
-      btnEl.classList.toggle("saved", nowSaved);
-      btnEl.querySelector("i").className = nowSaved ? "ti ti-heart-filled" : "ti ti-heart";
-      renderSavedRestaurantsMenu();
+      if (btnEl) {
+        btnEl.classList.add("saved");
+        btnEl.querySelector("i").className = "ti ti-heart-filled";
+      }
+      renderFrontSaved();
+      showToast("Saved");
+    }
+
+    // The Web Share API is real native OS share-sheet support, not a
+    // placeholder — genuinely easy to wire up, so this shares an actual
+    // Google Maps link straight to the restaurant's pin (via place_id when
+    // we have one, else raw coordinates, else a name+area search as a last
+    // resort) rather than faking the button. Desktop browsers mostly don't
+    // implement navigator.share, so those fall back to copying the same
+    // link to the clipboard instead.
+    async function shareRestaurant(index) {
+      const r = currentResults[index];
+      if (!r) return;
+      const mapsUrl = r.place_id
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name)}&query_place_id=${encodeURIComponent(r.place_id)}`
+        : (r.latitude && r.longitude)
+          ? `https://www.google.com/maps/search/?api=1&query=${r.latitude},${r.longitude}`
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name + (r.location ? ", " + r.location : ""))}`;
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: r.name, text: r.name, url: mapsUrl });
+        } catch (e) {
+          // AbortError just means the user backed out of the share sheet —
+          // not an actual failure worth surfacing.
+        }
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(mapsUrl);
+        showToast("Link copied");
+      } catch (e) {
+        window.prompt("Copy this link:", mapsUrl);
+      }
+    }
+
+    // Minimal transient confirmation — reused for any future "did that
+    // thing" feedback, not just sharing, so it's a generic message-in,
+    // auto-dismiss utility rather than something share-specific.
+    let toastTimer = null;
+    function showToast(message) {
+      let el = document.getElementById('toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'toast';
+        el.className = 'toast';
+        document.body.appendChild(el);
+      }
+      el.textContent = message;
+      el.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
     }
 
     function unsaveRestaurant(name) {
       const saved = loadSavedRestaurants().filter(s => s.name !== name);
       localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(saved));
-      renderSavedRestaurantsMenu();
       renderFrontSaved(); // keep the start-screen row in sync
+      // Only refresh the Saved page if it's actually the thing on screen —
+      // renderSavedView() re-reads localStorage itself either way, next
+      // time showSavedView() opens it.
+      if (!document.getElementById('savedView').hidden) renderSavedView();
       // Only re-render the results list/map if a search has actually run —
       // currentResults defaults to [] on the start screen, and re-rendering
       // with an empty array was incorrectly showing the "nothing fits" empty
@@ -1657,15 +1920,35 @@
       if (currentResults.length > 0) renderResults(currentResults);
     }
 
+    // The Saved page's own remove ✕ specifically — a dense list of small
+    // tap targets is exactly where a misclick loses something you meant to
+    // keep, unlike the heart toggle elsewhere (a lighter, already-reversible
+    // gesture that doesn't need this). Same window.confirm pattern
+    // deleteCategory already uses, not a custom dialog.
+    function confirmUnsaveRestaurant(name) {
+      if (window.confirm(`Remove "${name}" from Saved?`)) {
+        unsaveRestaurant(name);
+      }
+    }
+
     // Tapping a saved restaurant used to jump straight out to Google Maps
     // directions — now it shows the same card a real search result gets
     // (photos, reviews, ask box, and yes, still a Directions button from
     // there), since the full result object is already sitting in
-    // localStorage from when it was saved (see toggleSaveRestaurant).
+    // localStorage from when it was saved (see saveRestaurantToCategory).
     function viewSavedRestaurant(name) {
       const r = loadSavedRestaurants().find(s => s.name === name);
       if (!r) return;
       closeMenu();
+      // Opened from the Saved page itself (as opposed to the home screen's
+      // front-saved row) — keep browsing saved restaurants there instead of
+      // bouncing out to the map just to look at one of them and having to
+      // tap back into Saved afterward. The sheet works as an overlay
+      // regardless of what's behind it (see .bottom-sheet's z-index, above
+      // .saved-view on purpose) — switchView() below is skipped entirely in
+      // that case, not just deferred.
+      const openedFromSavedView = !document.getElementById('savedView').hidden;
+      if (!openedFromSavedView) hideSavedView();
       stopSuggestionChips();
       // This is genuinely the same "one restaurant, shown via the sheet,
       // enriched lazily" flow browsing the map uses — not a real search, so
@@ -1690,7 +1973,7 @@
       // of the map — no reason "peek at one restaurant" should feel like a
       // full page navigation just because it wasn't reached from a marker.
       // The saved snapshot's hours/phone/description are frozen from
-      // whenever this was saved (see toggleSaveRestaurant) and can be
+      // whenever this was saved (see saveRestaurantToCategory) and can be
       // stale — _detailsLoaded would still be true from back then, which
       // would otherwise skip the refetch below entirely.
       r._detailsLoaded = false;
@@ -1699,27 +1982,278 @@
       // anything — browsing nearby gets this for free from its /nearby
       // fetch, but this flow never touches the map otherwise, so without
       // this there's nothing behind the sheet for "Map" to reveal later.
-      switchView();
+      // Skipped when staying on the Saved page — there's nothing to pan a
+      // map toward when the map isn't what's on screen.
+      if (!openedFromSavedView) switchView();
       openBottomSheet(0);
       loadBrowseMarkerDetails(0);
     }
 
-    function renderSavedRestaurantsMenu() {
-      const container = document.getElementById("savedRestaurantsList");
-      if (!container) return;
-      const saved = loadSavedRestaurants();
-      if (saved.length === 0) {
-        container.innerHTML = `<div class="menu-item"><span>No saved restaurants yet</span></div>`;
+    // --- Saved page (see #savedView) — its own destination, not a menu
+    // section, so browsing by category doesn't require the menu open. ---
+
+    let activeSavedCategoryId = "all";
+    let savedSortMode = "recent"; // 'recent' | 'rating' | 'myrating' | 'distance'
+    let savedMiniMapVisible = false;
+
+    function showSavedView() {
+      closeMenu();
+      // Tapping the Saved nav button is a navigation, same as Home/Map —
+      // any single-restaurant sheet left open from wherever you were
+      // before (the map, or Saved itself if you're just re-tapping it)
+      // shouldn't persist across that switch.
+      closeBottomSheet();
+      document.getElementById('savedView').hidden = false;
+      renderSavedView();
+    }
+
+    function hideSavedView() {
+      document.getElementById('savedView').hidden = true;
+    }
+
+    function renderSavedView() {
+      renderSavedCategoriesRow();
+      renderSavedSortRow();
+      renderSavedViewList();
+      // Only actually redraws the map if it's currently toggled on — no
+      // point paying for a Leaflet instance + marker rebuild on every
+      // category/sort change if nobody's looking at it.
+      if (savedMiniMapVisible) renderSavedMiniMap();
+    }
+
+    function selectSavedCategory(id) {
+      activeSavedCategoryId = id;
+      renderSavedView();
+    }
+
+    function setSavedSort(mode) {
+      savedSortMode = mode;
+      renderSavedView();
+    }
+
+    const SAVED_SORT_OPTIONS = [
+      { id: "recent", label: "Recent" },
+      { id: "rating", label: "Top rated" },
+      { id: "myrating", label: "My rating" },
+      { id: "distance", label: "Nearest" },
+    ];
+
+    function renderSavedSortRow() {
+      const el = document.getElementById('savedSortRow');
+      if (!el) return;
+      el.innerHTML = SAVED_SORT_OPTIONS.map(o =>
+        `<button class="saved-sort-btn ${savedSortMode === o.id ? 'active' : ''}" onclick="setSavedSort('${o.id}')">${o.label}</button>`
+      ).join("");
+    }
+
+    // Sorted separately from filtering (see renderSavedViewList) so the
+    // mini-map can reuse the exact same ordering/filtering without
+    // duplicating either.
+    function getSortedSavedItems() {
+      const items = loadSavedRestaurants();
+      const filtered = activeSavedCategoryId === 'all' ? items : items.filter(r => r.categoryId === activeSavedCategoryId);
+      const sorters = {
+        recent: (a, b) => (b.savedAt || 0) - (a.savedAt || 0),
+        rating: (a, b) => (b.rating || 0) - (a.rating || 0),
+        myrating: (a, b) => (b.myRating || 0) - (a.myRating || 0),
+        // Frozen at save time (see saveRestaurantToCategory) and can go
+        // stale — same caveat every other saved-snapshot field already has.
+        distance: (a, b) => (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity),
+      };
+      return [...filtered].sort(sorters[savedSortMode] || sorters.recent);
+    }
+
+    function promptAddCategory() {
+      const category = createCategory(window.prompt('New category name (e.g. "Want to go")'));
+      if (category) {
+        activeSavedCategoryId = category.id;
+        renderSavedView();
+      }
+    }
+
+    function renderSavedCategoriesRow() {
+      const el = document.getElementById('savedCategoriesRow');
+      if (!el) return;
+      const items = loadSavedRestaurants();
+      const countFor = id => id === 'all' ? items.length : items.filter(r => r.categoryId === id).length;
+      // All, then Liked, always pinned first — everything else (custom
+      // categories) ranked by how much is actually in them, not by
+      // creation order, so the lists you actually use rise to the front
+      // instead of just piling up in the order you made them. Sort is
+      // stable, so ties fall back to creation order on their own.
+      const allCategories = loadSavedCategories();
+      const liked = allCategories.filter(c => c.id === 'liked');
+      const rest = allCategories.filter(c => c.id !== 'liked')
+        .sort((a, b) => countFor(b.id) - countFor(a.id));
+      const categories = [...liked, ...rest];
+      const chips = [{ id: 'all', name: 'All' }, ...categories].map(c => {
+        const active = activeSavedCategoryId === c.id;
+        // Delete is a small "x" that only shows up on the active, non-built-in
+        // chip — no separate "manage categories" screen needed for a POC.
+        const removable = active && c.id !== 'all' && c.id !== 'liked';
+        return `
+          <button class="saved-cat-chip ${active ? 'active' : ''}" onclick="selectSavedCategory('${c.id}')">
+            ${escapeHtml(c.name)} <span class="saved-cat-count">${countFor(c.id)}</span>
+            ${removable ? `<i class="ti ti-x saved-cat-remove" onclick="event.stopPropagation(); deleteCategory('${c.id}')"></i>` : ''}
+          </button>`;
+      }).join("");
+      el.innerHTML = chips + `<button class="saved-cat-chip saved-cat-add" onclick="promptAddCategory()" title="New category"><i class="ti ti-plus"></i></button>`;
+    }
+
+    function renderSavedViewList() {
+      const el = document.getElementById('savedViewList');
+      if (!el) return;
+      const filtered = getSortedSavedItems();
+      const categories = loadSavedCategories();
+      if (filtered.length === 0) {
+        el.innerHTML = `<p class="saved-view-empty">No saved restaurants ${activeSavedCategoryId === 'all' ? 'yet' : 'in this category yet'}.</p>`;
         return;
       }
-      container.innerHTML = saved.map(r => {
+      el.innerHTML = filtered.map(r => {
         const escapedName = escapeHtml(r.name.replace(/'/g, "\\'"));
+        const cat = categories.find(c => c.id === r.categoryId);
+        const photoHtml = r.photo_reference
+          ? `<img class="saved-list-photo" src="/photo?ref=${encodeURIComponent(r.photo_reference)}" alt="" loading="lazy" onerror="this.remove()">`
+          : `<div class="saved-list-photo saved-list-photo-empty"><i class="ti ti-tool-kitchen-2"></i></div>`;
+        // Your own rating, separate from Google's — filled stars up to
+        // myRating, only rendered at all once one's actually been set (see
+        // openSavedEditor), same "don't show an empty state nobody asked
+        // for" reasoning as the note below it.
+        const myRatingHtml = r.myRating
+          ? `<span class="saved-list-my-rating">${'<i class="ti ti-star-filled"></i>'.repeat(r.myRating)}</span>`
+          : '';
+        const noteHtml = r.myNote
+          ? `<p class="saved-list-note" onclick="event.stopPropagation(); this.classList.toggle('expanded')">${escapeHtml(r.myNote)}</p>`
+          : '';
         return `
-        <div class="menu-item saved-restaurant-item">
-          <span class="saved-restaurant-name" onclick="viewSavedRestaurant('${escapedName}')">${escapeHtml(r.name)}</span>
-          <i class="ti ti-x" onclick="event.stopPropagation(); unsaveRestaurant('${escapedName}')"></i>
-        </div>`;
+          <div class="saved-list-item" onclick="viewSavedRestaurant('${escapedName}')">
+            ${photoHtml}
+            <div class="saved-list-info">
+              <span class="saved-list-name">${escapeHtml(r.name)}</span>
+              <div class="saved-list-meta">
+                ${r.rating ? `<span class="saved-list-rating"><i class="ti ti-star-filled"></i> ${r.rating}</span>` : ''}
+                ${cat ? `<span class="saved-list-cat-tag">${escapeHtml(cat.name)}</span>` : ''}
+                ${myRatingHtml}
+              </div>
+              ${noteHtml}
+            </div>
+            <div class="saved-list-actions">
+              <i class="ti ti-pencil saved-list-edit" onclick="event.stopPropagation(); openSavedEditor('${escapedName}')" title="Add a note or rating"></i>
+              <i class="ti ti-x saved-list-remove" onclick="event.stopPropagation(); confirmUnsaveRestaurant('${escapedName}')"></i>
+            </div>
+          </div>`;
       }).join("");
+    }
+
+    // --- Personal note + rating per saved item (see openSavedEditor) ---
+
+    let editingSavedName = null;
+    let editingSavedRating = 0;
+
+    function openSavedEditor(name) {
+      const item = loadSavedRestaurants().find(s => s.name === name);
+      if (!item) return;
+      editingSavedName = name;
+      editingSavedRating = item.myRating || 0;
+      document.getElementById('savedEditTitle').textContent = item.name;
+      document.getElementById('savedEditNote').value = item.myNote || '';
+      renderSavedEditStars();
+      document.getElementById('savedEditOverlay').classList.add('open');
+    }
+
+    function closeSavedEditor() {
+      document.getElementById('savedEditOverlay').classList.remove('open');
+      editingSavedName = null;
+    }
+
+    // Tapping the star you already set clears the rating, rather than
+    // forcing a separate "clear" control just for that.
+    function setSavedEditRating(n) {
+      editingSavedRating = editingSavedRating === n ? 0 : n;
+      renderSavedEditStars();
+    }
+
+    function renderSavedEditStars() {
+      const el = document.getElementById('savedEditStars');
+      if (!el) return;
+      el.innerHTML = [1, 2, 3, 4, 5].map(n =>
+        `<i class="ti ti-star${n <= editingSavedRating ? '-filled' : ''} saved-edit-star" onclick="setSavedEditRating(${n})"></i>`
+      ).join("");
+    }
+
+    function saveSavedEdit() {
+      if (!editingSavedName) return;
+      const items = loadSavedRestaurants();
+      const item = items.find(s => s.name === editingSavedName);
+      if (item) {
+        item.myRating = editingSavedRating || null;
+        item.myNote = document.getElementById('savedEditNote').value.trim();
+        localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(items));
+      }
+      closeSavedEditor();
+      renderSavedView();
+    }
+
+    // --- Mini-map of the currently filtered saved list (see
+    // savedMiniMapVisible) — a second, independent Leaflet instance rather
+    // than reusing the main `map` variable, since that one's tied up with
+    // whatever the real search/browse flow is doing and can be null. ---
+
+    let savedMiniMapInstance = null;
+    let savedMiniMapMarkers = [];
+
+    function toggleSavedMiniMap() {
+      savedMiniMapVisible = !savedMiniMapVisible;
+      document.getElementById('savedMiniMapWrap').style.display = savedMiniMapVisible ? 'block' : 'none';
+      document.getElementById('savedMapToggle').classList.toggle('active', savedMiniMapVisible);
+      // Leaflet measures its container's real size on init/invalidateSize
+      // — while display:none, that's 0×0, so this has to wait until the
+      // wrapper's own display:block has actually taken effect.
+      if (savedMiniMapVisible) setTimeout(renderSavedMiniMap, 50);
+    }
+
+    // Same zoom-gated permanent-tooltip pattern the main map uses (see
+    // shouldShowLabels/updateMarkerLabelVisibility) — without it, a handful
+    // of unlabeled pins clustered together has no way to tell which
+    // restaurant is which, which was the actual complaint (not the map
+    // itself being confusing, just unlabeled).
+    function shouldShowSavedMiniMapLabels() {
+      return savedMiniMapInstance && savedMiniMapInstance.getZoom() >= LABEL_ZOOM_THRESHOLD;
+    }
+
+    function updateSavedMiniMapLabelVisibility() {
+      const show = shouldShowSavedMiniMapLabels();
+      savedMiniMapMarkers.forEach(m => { if (show) m.openTooltip(); else m.closeTooltip(); });
+    }
+
+    function renderSavedMiniMap() {
+      const el = document.getElementById('savedMiniMap');
+      if (!el) return;
+      const items = getSortedSavedItems().filter(r => r.latitude && r.longitude);
+      if (!savedMiniMapInstance) {
+        savedMiniMapInstance = L.map(el, { zoomControl: false, attributionControl: false });
+        L.tileLayer(getMapTileUrl(), { maxZoom: 19 }).addTo(savedMiniMapInstance);
+        savedMiniMapInstance.on('zoomend', updateSavedMiniMapLabelVisibility);
+      }
+      savedMiniMapInstance.invalidateSize();
+      savedMiniMapMarkers.forEach(m => savedMiniMapInstance.removeLayer(m));
+      savedMiniMapMarkers = items.map(r => {
+        const marker = L.marker([r.latitude, r.longitude], { icon: makePlainPin() }).addTo(savedMiniMapInstance);
+        marker.bindTooltip(r.name, { permanent: true, direction: 'top', offset: [0, -16], className: 'marker-label' });
+        marker.on('click', () => viewSavedRestaurant(r.name));
+        return marker;
+      });
+      if (savedMiniMapMarkers.length > 0) {
+        savedMiniMapInstance.fitBounds(L.featureGroup(savedMiniMapMarkers).getBounds().pad(0.25));
+      } else if (userLatitude != null && userLongitude != null) {
+        savedMiniMapInstance.setView([userLatitude, userLongitude], 12);
+      } else {
+        savedMiniMapInstance.setView([34.6687, 135.5014], 12);
+      }
+      // fitBounds/setView above already resolve the zoom synchronously, so
+      // this reflects the map's actual landing zoom rather than whatever
+      // zoom it happened to be at before this redraw.
+      updateSavedMiniMapLabelVisibility();
     }
 
     // The map is always the backdrop now, for both browse mode and a real
@@ -1731,6 +2265,7 @@
     // inlining this everywhere) since every caller needs the same handful
     // of steps in the same order.
     function switchView() {
+      hideSavedView();
       const mapEl = document.getElementById('mapView');
       mapEl.style.display = 'block';
       // The slogan is a pitch for "search smarter" — once you're looking at
@@ -1772,6 +2307,19 @@
     }
     syncBottomNavHeight();
 
+    // Same reasoning as syncBottomNavHeight above, for .results-sheet.mini:
+    // the handle row's height is padding + font-driven (no fixed height of
+    // its own), so a hardcoded px guess either clips the chevron or leaves
+    // a sliver of "What I understood" visible above the nav. Measuring the
+    // real element makes mini exactly as tall as the handle row, no more.
+    function syncResultsSheetMiniHeight() {
+      const handleRow = document.getElementById('resultsSheetHandleRow');
+      if (handleRow) {
+        document.documentElement.style.setProperty('--results-sheet-mini-h', `${handleRow.offsetHeight}px`);
+      }
+    }
+    syncResultsSheetMiniHeight();
+
     function resizeMapToFill() {
       const mapEl = document.getElementById('mapView');
       const top = mapEl.getBoundingClientRect().top;
@@ -1783,6 +2331,7 @@
 
     window.addEventListener('resize', () => {
       syncBottomNavHeight();
+      syncResultsSheetMiniHeight();
       if (document.getElementById('mapView').style.display === 'block') {
         resizeMapToFill();
         map && map.invalidateSize();
@@ -1823,6 +2372,12 @@
     // transition) to actually take back over once the drag ends.
     function setResultsSheetState(state) {
       const sheet = document.getElementById('resultsSheet');
+      // The handle row only has a real, non-zero offsetHeight once the
+      // sheet itself is unhidden — measuring it here (every state change,
+      // cheap) rather than only once at page load means it's never stuck
+      // at a stale 0px from a measurement taken while [hidden] was still
+      // in effect.
+      syncResultsSheetMiniHeight();
       resultsSheetState = state;
       sheet.style.height = '';
       sheet.classList.toggle('mini', state === 'mini');
@@ -1854,7 +2409,7 @@
     (function setupResultsSheetDrag() {
       const sheet = document.getElementById('resultsSheet');
       const handle = document.getElementById('resultsSheetHandleRow');
-      const MINI_H = 60, PEEK_H = 190;
+      const PEEK_H = 190;
       // Below this, a release counts as a tap rather than a drag — matters
       // because the handle used to be a <button onclick=...> on top of
       // this same pointer logic: its native click fired right after every
@@ -1872,6 +2427,15 @@
         return window.innerHeight * 0.7;
       }
 
+      // Also measured fresh each time rather than cached at setup — this
+      // IIFE runs once at page load, while the sheet is still [hidden] and
+      // the handle row's offsetHeight would read 0. By the time a drag
+      // actually happens the sheet is visible, so this matches
+      // --results-sheet-mini-h (see syncResultsSheetMiniHeight) for real.
+      function miniHeight() {
+        return handle.offsetHeight || 44;
+      }
+
       handle.addEventListener('pointerdown', (e) => {
         dragging = true;
         maxMove = 0;
@@ -1887,7 +2451,7 @@
         // sheet, hence startY - e.clientY rather than the reverse.
         const delta = startY - e.clientY;
         maxMove = Math.max(maxMove, Math.abs(delta));
-        const next = Math.max(MINI_H, Math.min(fullHeight(), startHeight + delta));
+        const next = Math.max(miniHeight(), Math.min(fullHeight(), startHeight + delta));
         sheet.style.height = `${next}px`;
       });
 
@@ -1900,7 +2464,11 @@
           // set live by pointermove (if any) needs clearing first, or it'd
           // override whatever class setResultsSheetState is about to apply.
           sheet.style.height = '';
-          toggleResultsSheetState();
+          // Not toggleResultsSheetState() (peek<->full) — tapping the handle
+          // to collapse should match tapping the map to collapse, both
+          // dropping all the way to mini, same reasoning as the "Apple
+          // Stocks" behavior this sheet is already matching elsewhere.
+          setResultsSheetState(resultsSheetState === 'full' ? 'mini' : 'full');
           return;
         }
         // Snaps to whichever of the three states the release point actually
@@ -1909,7 +2477,7 @@
         // overshooting to mini or full.
         const h = sheet.getBoundingClientRect().height;
         const full = fullHeight();
-        const distances = { mini: Math.abs(h - MINI_H), peek: Math.abs(h - PEEK_H), full: Math.abs(h - full) };
+        const distances = { mini: Math.abs(h - miniHeight()), peek: Math.abs(h - PEEK_H), full: Math.abs(h - full) };
         const nearest = Object.keys(distances).reduce((a, b) => distances[a] <= distances[b] ? a : b);
         setResultsSheetState(nearest);
       }
@@ -1933,6 +2501,14 @@
       // entirely is Home's job (bottom-nav/menu), not this button's.
       if (browseMode) {
         closeBottomSheet();
+        // That deep dive can now be opened from the Saved page too (see
+        // viewSavedRestaurant), not just the map — tapping Map here should
+        // actually take you there instead of just closing the sheet and
+        // leaving you exactly where you were.
+        if (!document.getElementById('savedView').hidden) {
+          hideSavedView();
+          switchView();
+        }
         return;
       }
       // A real search that's loading, or already showing results, owns this
@@ -2088,13 +2664,18 @@
         L.control.zoom({ position: 'bottomright' }).addTo(map);
         map.on('zoomend', updateMarkerLabelVisibility);
         // Tapping empty map — not a marker, Leaflet doesn't bubble those
-        // clicks up to the map itself — drops the results sheet all the way
-        // to mini, same as tapping the stock list behind Apple's Stocks app
-        // panel sends that panel to its own smallest state rather than just
-        // one step down. Maximizes the map instead of leaving a peek-sized
-        // strip of the sheet still sitting over it.
+        // clicks up to the map itself — drops whichever sheet is currently
+        // showing (results list or the browse-mode single-restaurant sheet)
+        // all the way to mini, same as tapping the stock list behind Apple's
+        // Stocks app panel sends that panel to its own smallest state rather
+        // than just one step down. Maximizes the map instead of leaving a
+        // peek-sized strip of the sheet still sitting over it. The two
+        // sheets are mutually exclusive (deepDiveRestaurant only opens the
+        // bottom-sheet while browseMode is true), so only one branch here
+        // ever actually applies at once.
         map.on('click', () => {
           if (!browseMode && resultsSheetState !== 'mini') setResultsSheetState('mini');
+          if (browseMode && bottomSheetState !== 'closed' && bottomSheetState !== 'mini') setBottomSheetState('mini');
         });
       } else {
         markers.forEach(m => m.remove());
@@ -2249,10 +2830,25 @@
     // and clearing live in the marker popup itself (see makePopupHtml) —
     // an earlier separate floating control duplicated those same buttons
     // and got removed as redundant.
-    function showRouteOnMap(index, mode) {
+    async function showRouteOnMap(index, mode) {
       const r = currentResults[index];
       if (!r || !r.latitude || !r.longitude) return;
-      if (userLatitude == null || userLongitude == null) return;
+      // A real search or browseNearbyOnMap always resolves this first —
+      // but viewSavedRestaurant/viewShowcaseRestaurant never did, since
+      // neither needed it themselves. Tapping Directions straight from a
+      // saved restaurant's sheet (never having searched or browsed this
+      // session) hit this guard and silently did nothing, which read as
+      // "Directions doesn't work" — same fix browseNearbyOnMap already
+      // applies to itself.
+      const got = await ensureLocation();
+      if (!got || userLatitude == null || userLongitude == null) {
+        // Not the .error banner — that lives inside .container, which the
+        // Saved page/single-restaurant sheet both render on top of and
+        // would just silently bury this. showToast is fixed-position and
+        // visible regardless of what's currently on screen.
+        showToast("Couldn't get your location — set one manually from the menu");
+        return;
+      }
 
       // A route drawn on the map means nothing if a sheet is still covering
       // most of it — this is what "Directions doesn't work" from inside the
@@ -2780,7 +3376,6 @@
     document.getElementById("distanceUnitLabel").textContent = distanceUnit;
     document.getElementById("maxResultsLabel").textContent = maxResults;
     renderSearchHistory();
-    renderSavedRestaurantsMenu();
     startSuggestionChips();
 
     // ── Google Sign-In ──
