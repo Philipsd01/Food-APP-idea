@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Restaurant Discovery</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#8B3A1F">
@@ -160,11 +160,17 @@
     </div>
 
     <div class="search-box">
-      <input type="text" id="searchInput" placeholder="Describe what you're looking for...">
-      <!-- Hidden by default — attachVoiceInput only reveals this once it's
-           confirmed the browser actually supports speech recognition (see
-           its own comment). Never something the app depends on working. -->
-      <button class="voice-btn" id="searchVoiceBtn" hidden title="Search by voice" aria-label="Search by voice"><i class="ti ti-microphone"></i></button>
+      <div class="search-input-wrap">
+        <input type="text" id="searchInput" enterkeyhint="search" placeholder="Describe what you're looking for...">
+        <!-- Hidden by default — attachVoiceInput only reveals this once
+             it's confirmed the browser actually supports speech
+             recognition (see its own comment). Never something the app
+             depends on working. Sits inside the input's own pill now
+             instead of as a separate circle beside it — same treatment
+             the floating map-view search bar needs (see body.map-active
+             .search-box), so this is just how the component always looks. -->
+        <button class="voice-btn" id="searchVoiceBtn" hidden title="Search by voice" aria-label="Search by voice"><i class="ti ti-microphone"></i></button>
+      </div>
       <button class="search-btn" id="searchBtn" onclick="search()">
         <i class="ti ti-arrow-up"></i>
       </button>
@@ -198,9 +204,7 @@
 
     <div class="error" id="error">Something went wrong. Try again.</div>
 
-    <div id="mapView"
-      style="display: none; min-height: 320px; border-radius: 12px; overflow: hidden; margin-top: 10px;">
-    </div>
+    <div id="mapView" style="display: none;"></div>
   </div>
   </div>
 
@@ -981,14 +985,13 @@
       sheet.classList.toggle('peek', state === 'peek');
       sheet.classList.toggle('full', state === 'full');
       const backdrop = document.getElementById('sheetBackdrop');
-      // Backdrop only dims once there's enough sheet to actually cover the
-      // map — at mini, the map underneath should stay fully interactive.
-      backdrop.classList.toggle('open', state === 'peek' || state === 'full');
-      // Blocking (see .sheet-backdrop.open.blocking) is stricter than the
-      // dim above — only 'full' actually locks out the map/Saved page
-      // underneath. 'peek' still just dims, same as it always has; the map
-      // underneath stays interactive since that's a deliberate half-open
-      // glance, not the sheet's full focus.
+      // Dim tracks blocking exactly now — only 'full' actually locks out
+      // the map/Saved page underneath (see .sheet-backdrop.open.blocking),
+      // so only 'full' dims. 'mini' and 'peek' both leave the map fully
+      // interactive, and a dimmed-but-still-clickable map was a visual lie
+      // about that — it read as "you can't touch this" when you actually
+      // could.
+      backdrop.classList.toggle('open', state === 'full');
       backdrop.classList.toggle('blocking', state === 'full');
     }
 
@@ -1839,6 +1842,17 @@
     // same requirement the PWA install already relies on.
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+    // Whichever mic (search box, or one restaurant card's ask box) is
+    // currently listening, if any — a navigation action (switchView,
+    // resetSearch, openMenu, showSavedView) calls stopActiveVoiceInput() so
+    // the mic doesn't keep silently capturing audio for an input the
+    // person's already left, and starting a second mic stops whatever was
+    // already listening elsewhere first (only one should ever be live).
+    let activeVoiceSession = null;
+    function stopActiveVoiceInput() {
+      if (activeVoiceSession) activeVoiceSession(false); // false = don't refocus, we're navigating away
+    }
+
     // Fills inputEl with the transcript and stops there — like typing, it
     // doesn't auto-submit, so a misheard word can be reviewed/edited before
     // whatever the input triggers (search, ask) actually runs.
@@ -1869,6 +1883,11 @@
       let userStopped = false;
       let finalTranscript = '';
       let silenceTimer = null;
+      // false only for a navigation-triggered stop (see stopListening) —
+      // refocusing an input the person's actively navigating away from
+      // would just pop the keyboard back up over whatever they tapped to
+      // go look at instead.
+      let refocusOnStop = true;
 
       function scheduleSilenceStop() {
         clearTimeout(silenceTimer);
@@ -1876,6 +1895,18 @@
           userStopped = true; // same flag the mic button uses — don't auto-restart after this
           recognition.stop();
         }, SILENCE_TIMEOUT_MS);
+      }
+
+      // Registered as this mic's entry in activeVoiceSession — called the
+      // same way the mic button itself stops a session, just skipping the
+      // refocus when it's a navigation action doing the stopping rather
+      // than the person themselves.
+      function stopListening(refocus) {
+        if (!listening) return;
+        refocusOnStop = refocus;
+        userStopped = true;
+        clearTimeout(silenceTimer);
+        recognition.abort();
       }
 
       recognition.addEventListener('result', (e) => {
@@ -1907,7 +1938,9 @@
         listening = false;
         clearTimeout(silenceTimer);
         micBtnEl.classList.remove('listening');
-        inputEl.focus();
+        if (activeVoiceSession === stopListening) activeVoiceSession = null;
+        if (refocusOnStop) inputEl.focus();
+        refocusOnStop = true;
       });
       recognition.addEventListener('error', (e) => {
         // 'no-speech' fires constantly during normal pauses between
@@ -1920,16 +1953,16 @@
       micBtnEl.addEventListener('click', (e) => {
         e.stopPropagation();
         if (listening) {
-          userStopped = true;
-          clearTimeout(silenceTimer);
-          recognition.stop();
+          stopListening(true);
           return;
         }
+        stopActiveVoiceInput(); // only one mic should ever be live at once
         finalTranscript = '';
         inputEl.value = '';
         userStopped = false;
         listening = true;
         micBtnEl.classList.add('listening');
+        activeVoiceSession = stopListening;
         scheduleSilenceStop(); // also covers "said nothing at all" — not just gaps after real speech
         try {
           recognition.start();
@@ -2037,10 +2070,6 @@
 
         currentResults = data.results;
         renderResults(currentResults);
-        // Expands the sheet now that there's real content sitting inside it
-        // — the height transition (see .results-sheet.full) animates the
-        // reveal instead of the list just appearing at full size.
-        setResultsSheetState('full');
 
         // "Directions to X" means the user already knows where they're
         // going — skip making them tap into the list and hit Directions
@@ -2048,12 +2077,25 @@
         // Results are already sorted by score, and a directions query is a
         // name search (forced to 90+), so index 0 is the intended place.
         if (a.wants_directions && currentResults.length > 0 && currentResults[0].latitude && currentResults[0].longitude) {
+          // Expands the sheet first (unaffected by the is_brand branch
+          // below) — the height transition (see .results-sheet.full)
+          // animates the reveal, then showRouteOnMap takes over from here.
+          setResultsSheetState('full');
           showRouteOnMap(0, 'driving');
         } else if (a.is_brand && currentResults.length > 0 && markers[0]) {
-          // Searched a specific restaurant by name — the map alone doesn't
-          // say "this is the one you asked for" without tapping it, so
-          // open its popup instead of leaving that as an extra step.
+          // A plain name search ("find me X") lands on the map with the
+          // pin visible, not buried under the results sheet — mini keeps
+          // the sheet out of the way entirely (peek's 280px risked
+          // covering the very pin this search was about), while the
+          // marker's own popup still confirms "this is the one you asked
+          // for" without an extra tap to get there.
+          setResultsSheetState('mini');
           markers[0].openPopup();
+        } else {
+          // Expands the sheet now that there's real content sitting inside
+          // it — the height transition (see .results-sheet.full) animates
+          // the reveal instead of the list just appearing at full size.
+          setResultsSheetState('full');
         }
 
         searchInput.placeholder = '↳ refine: "but cheaper" or "with outdoor seating"';
@@ -2077,6 +2119,7 @@
       // too, so a single-restaurant sheet left open from wherever you were
       // shouldn't persist underneath it.
       closeBottomSheet();
+      stopActiveVoiceInput();
       document.getElementById("sideMenu").classList.add("open");
       document.getElementById("menuOverlay").classList.add("open");
     }
@@ -2095,6 +2138,7 @@
 
     function resetSearch() {
       hideSavedView();
+      stopActiveVoiceInput();
       currentAnalysis = null;
       lastQuery = "";
       browseMode = false;
@@ -2111,6 +2155,10 @@
       // switchView() hides this to give the map more room — reset back
       // to visible since we're leaving map view behind entirely here.
       document.getElementById('headerDecor').style.display = '';
+      // Un-floats the search bar back into the normal page flow and drops
+      // the map's full-bleed fixed positioning — the mirror of switchView()
+      // adding this.
+      document.body.classList.remove('map-active');
       // The results sheet only makes sense once there's a real search to
       // show — closeBottomSheet handles the single-restaurant one, this is
       // that same idea for the multi-result one.
@@ -2520,6 +2568,7 @@
       // before (the map, or Saved itself if you're just re-tapping it)
       // shouldn't persist across that switch.
       closeBottomSheet();
+      stopActiveVoiceInput();
       document.getElementById('savedView').hidden = false;
       renderSavedView();
     }
@@ -2794,20 +2843,22 @@
     // of steps in the same order.
     function switchView() {
       hideSavedView();
+      stopActiveVoiceInput();
       const mapEl = document.getElementById('mapView');
       mapEl.style.display = 'block';
       // The slogan is a pitch for "search smarter" — once you're looking at
       // the map you're past that, so it just costs vertical space here.
       // Hidden to keep the map itself as the dominant element on screen.
       document.getElementById('headerDecor').style.display = 'none';
+      // Full-bleed map with the search bar floating on top (see
+      // body.map-active #mapView / .search-box) — CSS owns the sizing
+      // entirely now via fixed positioning, so there's no scroll-into-view
+      // needed either: the map is always already on screen the instant
+      // this class lands, not somewhere below the fold to scroll down to.
+      document.body.classList.add('map-active');
       resizeMapToFill();
-      // 'nearest' only scrolls if the map isn't already visible, instead of
-      // always jumping it to the top of the screen — switching views
-      // shouldn't feel like the page yanked control away from you.
-      mapEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       setTimeout(() => {
         resizeMapToFill();
-        map && map.invalidateSize();
         if (markers.length === 0) initMap(currentResults);
       }, 100);
       updateMapNavIcon();
@@ -2848,13 +2899,15 @@
     }
     syncResultsSheetMiniHeight();
 
+    // #mapView sizes itself now (position: fixed, top: 0, bottom:
+    // var(--bottom-nav-h) — see body.map-active #mapView), rather than this
+    // measuring the page and setting an inline height, which would fight
+    // that fixed positioning anyway (inline styles win the cascade). Leaflet
+    // still caches its container's pixel size internally, though, so it
+    // needs this explicit nudge whenever that size could have changed —
+    // hence every previous caller of this function keeping their call site.
     function resizeMapToFill() {
-      const mapEl = document.getElementById('mapView');
-      const top = mapEl.getBoundingClientRect().top;
-      const bottomNav = document.getElementById('bottomNav');
-      const bottomReserve = (bottomNav && bottomNav.offsetHeight) || 0;
-      const height = Math.max(320, window.innerHeight - top - bottomReserve - 10);
-      mapEl.style.height = `${height}px`;
+      map && map.invalidateSize();
     }
 
     window.addEventListener('resize', () => {
@@ -2862,7 +2915,6 @@
       syncResultsSheetMiniHeight();
       if (document.getElementById('mapView').style.display === 'block') {
         resizeMapToFill();
-        map && map.invalidateSize();
       }
     });
 

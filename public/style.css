@@ -231,12 +231,21 @@ body {
     margin-bottom: 16px;
 }
 
-.search-box input {
+/* Wraps the input and its mic button into one visual pill — the mic sits
+   inside the input's own padding area (see .search-input-wrap .voice-btn
+   below) instead of as a separate circle beside it. */
+.search-input-wrap {
+    position: relative;
     flex: 1;
+    min-width: 0;
+}
+
+.search-box input {
+    width: 100%;
     background: var(--card-bg);
     border: 0.5px solid var(--border);
     border-radius: 24px;
-    padding: 11px 16px;
+    padding: 11px 42px 11px 16px;
     color: var(--ink);
     font-family: var(--sans);
     font-size: 14px;
@@ -250,6 +259,30 @@ body {
 
 .search-box input:focus {
     border-color: var(--ink-2);
+}
+
+.search-input-wrap .voice-btn {
+    position: absolute;
+    right: 3px;
+    top: 50%;
+    /* margin-top, not transform: translateY(-50%) — .listening's own
+       voice-pulse animation (see its keyframes) sets transform: scale(...)
+       on every frame, which would silently overwrite a transform-based
+       offset here and visibly knock the button out of position the moment
+       it starts pulsing. Margin-based centering doesn't touch that
+       property at all, so the two don't fight. */
+    margin-top: -16px;
+    width: 32px;
+    height: 32px;
+}
+
+/* Flat icon at rest — .listening (see style below) still pops out as its
+   own filled ember circle so an active recording stays an obvious, visible
+   state rather than blending into the pill. */
+.search-input-wrap .voice-btn:not(.listening) {
+    background: none;
+    border: none;
+    box-shadow: none;
 }
 
 /* Everything on this block is start-screen-only content — shown by
@@ -623,6 +656,55 @@ body {
 @keyframes voice-pulse {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.08); }
+}
+
+/* ── Native map view (see switchView/resetSearch toggling body.map-active)
+   — the map goes full-bleed, extending behind the status bar/notch, with
+   the search bar floating on top of it instead of sitting in its own bar
+   above the map. Google/Apple Maps' own layout, not a custom invention. ── */
+body.map-active .container {
+    padding: 0;
+}
+
+body.map-active #mapView {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: var(--bottom-nav-h);
+    height: auto;
+    margin: 0;
+    border-radius: 0;
+    /* Own stacking context (position + z-index together) — Leaflet's
+       internal panes/controls (up to ~1000) become contained inside this
+       automatically, regardless of their own z-index values, so none of
+       the app's overlay z-indices (results sheet, bottom sheet, etc. —
+       all 1081+) need to individually outrank Leaflet by name anymore. */
+    z-index: 1;
+}
+
+/* Floats over the map rather than sitting in its own bar above it —
+   env(safe-area-inset-top) clears the notch/status bar even though the
+   map itself (above) deliberately extends behind it. left/right + a capped
+   max-width/auto margin stretches edge-to-edge on a phone and centers with
+   room to spare on anything wider, same trick as .saved-toolbar's own
+   max-width: 480px; margin: 0 auto. */
+body.map-active .search-box {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 14px);
+    left: 16px;
+    right: 16px;
+    max-width: 480px;
+    margin: 0 auto;
+    z-index: 50;
+}
+
+/* A flat pill read fine against the page's own paper background, but
+   needs real depth to stay legible sitting directly on top of variable
+   map tiles/photos. */
+body.map-active .search-box input,
+body.map-active .search-btn {
+    box-shadow: 0 3px 14px rgba(0, 0, 0, 0.22);
 }
 
 
@@ -2100,6 +2182,9 @@ body.dark .login-gate {
     transition: opacity 0.25s ease;
 }
 
+/* Only applied at 'full' now (see setBottomSheetState) — dim tracks
+   .blocking below exactly, so the map never looks dimmed-and-untouchable
+   while it's actually still interactive (mini/peek). */
 .sheet-backdrop.open {
     opacity: 1;
 }
