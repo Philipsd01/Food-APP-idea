@@ -17,7 +17,6 @@
     --ember-light: #C4602E;
     --mark: #E8DC9A;
     --border: #D4CFC6;
-    --border-light: #E4DFD8;
     --card-bg: #FFFFFF;
     --serif: 'Playfair Display', Georgia, serif;
     --sans: 'DM Sans', -apple-system, sans-serif;
@@ -27,13 +26,6 @@
        load/resize, so every fixed panel that stops above the nav lines up
        exactly instead of leaving an approximation gap. */
     --bottom-nav-h: 64px;
-
-    /* Light mode chip states */
-    --chip-filled-bg: var(--ink);
-    --chip-filled-color: var(--paper);
-    --chip-outlined-border: var(--ink-2);
-    --chip-outlined-color: var(--ink-2);
-    --chip-strike-color: var(--ink-3);
 }
 
 body {
@@ -587,6 +579,52 @@ body {
     /* cream, not white */
 }
 
+/* ── Voice input (see attachVoiceInput) — secondary styling next to the
+   primary search-btn/ask-btn, so it reads as an alternative input method,
+   not the main action. Hidden by default in HTML; only shown once
+   attachVoiceInput confirms the browser actually supports it. ── */
+.voice-btn {
+    background: var(--card-bg);
+    border: 0.5px solid var(--border);
+    border-radius: 50%;
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    color: var(--ink-3);
+    font-size: 17px;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.voice-btn:hover {
+    color: var(--ember);
+    border-color: var(--ember-light);
+}
+
+/* .ask-btn's own 32px sizing takes priority when both classes are on the
+   same element (the ask-row's mic button) — this only overrides what
+   .voice-btn set above. */
+.ask-btn.voice-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 13px;
+}
+
+.voice-btn.listening {
+    background: var(--ember);
+    border-color: var(--ember);
+    color: #fff;
+    animation: voice-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+}
+
 
 /* ── Results ── */
 .results {
@@ -705,15 +743,6 @@ body {
     flex-wrap: wrap;
     gap: 4px;
     margin-bottom: 8px;
-}
-
-.card-confidence {
-    font-family: var(--mono);
-    font-size: 9px;
-    color: var(--ink-3);
-    letter-spacing: 0.08em;
-    margin-bottom: 8px;
-    text-transform: uppercase;
 }
 
 .card-summary {
@@ -950,32 +979,12 @@ body {
     }
 }
 
-.skeleton-card {
-    background: var(--card-bg);
-    border-radius: 12px;
-    padding: 14px 16px;
-    border: 0.5px solid var(--border);
-    margin-bottom: 10px;
-}
-
 .skeleton-line {
     height: 12px;
     border-radius: 6px;
     background: linear-gradient(90deg, var(--border) 25%, var(--paper) 50%, var(--border) 75%);
     background-size: 800px 100%;
     animation: shimmer 1.5s infinite;
-}
-
-.skeleton-line.title {
-    width: 50%;
-    height: 18px;
-    margin-bottom: 12px;
-}
-
-.skeleton-line.tags {
-    width: 75%;
-    height: 10px;
-    margin-bottom: 10px;
 }
 
 .skeleton-line.text1 {
@@ -1189,10 +1198,6 @@ body {
     font-family: var(--sans);
 }
 
-.menu-arrow {
-    display: none;
-}
-
 .menu-value {
     font-size: 12px !important;
     color: var(--ink-3) !important;
@@ -1379,7 +1384,6 @@ body.dark {
     /* New gilt — dark-mode-only accent */
     --gilt: #D9C97A;
     --border: #2C2620;
-    --border-light: #332E28;
     --card-bg: #211C17;
 }
 
@@ -1495,11 +1499,6 @@ body.dark .evidence-quote {
 }
 
 /* Dark skeleton shimmer */
-body.dark .skeleton-card {
-    background: var(--card-bg);
-    border-color: var(--border);
-}
-
 body.dark .skeleton-line {
     background: linear-gradient(90deg, var(--border) 25%, #2A2520 50%, var(--border) 75%);
     background-size: 800px 100%;
@@ -1775,10 +1774,6 @@ body.dark .custom-popup .leaflet-popup-content-wrapper {
 
 body.dark .custom-popup .leaflet-popup-tip {
     background: var(--card-bg);
-}
-
-.clear-route-control a:hover {
-    background: var(--paper-2);
 }
 
 body.dark .map-popup-dot.high {
@@ -2107,24 +2102,25 @@ body.dark .login-gate {
 
 .sheet-backdrop.open {
     opacity: 1;
-    /* Was pointer-events: auto, with an onclick to dismiss — this backdrop
-       spans the full screen above the nav, not just the area actually
-       behind the sheet, so that also caught every tap on the strip of map
-       deliberately left visible/interactive above it (see openBottomSheet's
-       pan-into-view), closing the whole sheet instead of letting that tap
-       reach the map. Purely a dimming visual now; closing goes through the
-       X button or the drag-down gesture instead. */
 }
 
-/* Applied only when the sheet was opened over the Saved page rather than
-   the map (see openBottomSheet) — unlike the map, there's no reason for
-   the Saved list underneath to stay tappable while this sheet is up, so
-   this actually catches the tap and collapses to mini (see
-   handleSheetBackdropTap) instead of letting it silently reach a
-   different saved card underneath. */
+/* Only applied at 'full' (see setBottomSheetState), not 'peek' — fully up
+   is the one state meant to be the sole focus, blocking whatever's behind
+   it (map or Saved page); half down or mini, the map is deliberately still
+   pannable/tappable underneath, browsing a different marker while just
+   peeking at this one. A tap here collapses straight to mini instead of
+   reaching whatever's underneath (see handleSheetBackdropTap). */
 .sheet-backdrop.open.blocking {
     pointer-events: auto;
     cursor: pointer;
+}
+
+/* Sits just under .results-sheet (1082) instead of .sheet-backdrop's own
+   1092 — this backdrop only ever needs to clear Leaflet's own panes
+   (~1000) and stay below the results sheet's own content, not the
+   single-restaurant sheet's separate, higher tier. */
+.results-sheet-backdrop {
+    z-index: 1081;
 }
 
 .bottom-sheet {
@@ -2596,10 +2592,42 @@ body.dark .login-gate {
     opacity: 0.7;
 }
 
+/* The removable variant (see renderSavedCategoriesRow) is a plain div
+   wrapping two real sibling <button>s instead of nesting the remove icon
+   inside the select button — same pill look, but both pieces stay
+   independently reachable by keyboard/screen reader. */
+.saved-cat-chip.removable {
+    padding: 7px 8px 7px 14px;
+}
+
+.saved-cat-chip-select {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    color: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
 .saved-cat-remove {
-    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    padding: 4px;
     margin-left: 2px;
+    font-size: 11px;
+    color: inherit;
     opacity: 0.8;
+    cursor: pointer;
 }
 
 .saved-cat-add {
@@ -2887,6 +2915,302 @@ body.dark .login-gate {
     color: #fff;
 }
 
+.review-editor-delete {
+    margin-top: 8px;
+    background: none;
+    border-color: var(--border);
+    color: var(--ink-3);
+    font-weight: 500;
+}
+
+.review-editor-delete:hover {
+    border-color: var(--ember);
+    color: var(--ember);
+}
+
+/* ── Community reviews (see loadCommunityReviews) — real, other-users-
+   visible reviews, shown alongside (not instead of) the Google review
+   quotes in .evidence above. Same collapse/expand shape as .evidence. ── */
+.community-reviews {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+    padding-top: 0;
+}
+
+.card.expanded .community-reviews {
+    max-height: 600px;
+    opacity: 1;
+    padding-top: 10px;
+    border-top: 0.5px solid var(--border);
+}
+
+.community-reviews-loading,
+.community-reviews-empty {
+    font-size: 12px;
+    color: var(--ink-3);
+    font-style: italic;
+}
+
+.community-reviews-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.community-reviews-title {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-2);
+}
+
+.community-review-write-btn {
+    flex-shrink: 0;
+    background: none;
+    border: 0.5px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ember);
+    cursor: pointer;
+}
+
+.community-review-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.community-review {
+    padding-bottom: 10px;
+    border-bottom: 0.5px solid var(--border);
+}
+
+.community-review:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.community-review-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.community-review-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.community-review-avatar-empty {
+    background: var(--paper-2);
+    border: 0.5px solid var(--border);
+}
+
+.community-review-meta {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.community-review-name {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.community-review-stars {
+    font-size: 10px;
+    color: var(--ember);
+    letter-spacing: 1px;
+}
+
+.community-review-breakdown {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--ink-3);
+    opacity: 0.8;
+    margin-bottom: 4px;
+}
+
+/* Only rendered on the signed-in user's own review (see isMine in
+   renderCommunityReviews) — margin-left:auto pushes it to the header's
+   right edge without needing a separate wrapper. */
+.community-review-share-btn {
+    margin-left: auto;
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--ink-3);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.community-review-share-btn:hover {
+    color: var(--ember);
+}
+
+.community-review-photos {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+
+.community-review-photo {
+    width: 56px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.community-review-text {
+    font-size: 12px;
+    color: var(--ink-3);
+    line-height: 1.5;
+}
+
+/* ── Review editor's mandatory overall rating (see
+   renderReviewEditorOverallStars) — bigger stars than the optional
+   category rows below, so it reads as the primary action, not just
+   another row among equals. ── */
+.review-editor-overall {
+    margin-bottom: 10px;
+}
+
+.review-editor-overall-label {
+    display: block;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 4px;
+}
+
+.review-editor-overall-row {
+    display: flex;
+    gap: 8px;
+}
+
+.review-editor-overall-star {
+    font-size: 30px;
+    color: var(--border);
+    cursor: pointer;
+}
+
+.review-editor-overall-star.ti-star-filled {
+    color: var(--ember);
+}
+
+.review-editor-optional-label {
+    font-family: var(--sans);
+    font-size: 11px;
+    color: var(--ink-3);
+    margin: 0 0 8px;
+    padding-top: 10px;
+    border-top: 0.5px solid var(--border);
+}
+
+/* ── Review editor's optional per-category rows (see
+   renderReviewEditorCategories) — smaller than the overall row above. ── */
+.review-editor-categories {
+    margin-bottom: 12px;
+}
+
+.review-editor-category {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.review-editor-category-label {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-2);
+    flex-shrink: 0;
+}
+
+.review-editor-category .saved-edit-stars {
+    margin-bottom: 0;
+}
+
+.review-editor-photos {
+    margin-bottom: 14px;
+}
+
+.review-editor-photo-previews {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.review-editor-photo-thumb {
+    position: relative;
+    width: 56px;
+    height: 56px;
+}
+
+.review-editor-photo-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 8px;
+}
+
+.review-editor-photo-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: 50%;
+    font-size: 9px;
+    cursor: pointer;
+    padding: 0;
+}
+
+.review-editor-photo-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--paper-2);
+    border: 0.5px dashed var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-3);
+    cursor: pointer;
+}
+
+.review-editor-photo-add:hover {
+    color: var(--ember);
+    border-color: var(--ember-light);
+}
+
 /* ── Save-to-category picker (see openSaveCategoryPicker) — same dimmed
    full-screen backdrop + centered card pattern as the login gate, just
    dismissible. ── */
@@ -2909,6 +3233,7 @@ body.dark .login-gate {
 }
 
 .save-picker-card {
+    position: relative;
     width: 100%;
     max-width: 480px;
     background: var(--paper);
@@ -2916,6 +3241,26 @@ body.dark .login-gate {
     padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
     transform: translateY(12px);
     transition: transform 0.2s ease;
+}
+
+/* Optional per card (see reviewEditorOverlay) — the save-category and
+   note/rating pickers close by tapping the backdrop, same as before; this
+   is only for cards where an explicit X was asked for. */
+.save-picker-close-btn {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    background: none;
+    border: none;
+    color: var(--ink-3);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+}
+
+.save-picker-close-btn:hover {
+    color: var(--ember);
 }
 
 .save-picker-overlay.open .save-picker-card {

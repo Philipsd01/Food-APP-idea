@@ -1,16 +1,55 @@
 require("dotenv").config();
 
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const multer = require("multer");
 const express = require("express");
 const Anthropic = require("@anthropic-ai/sdk");
 const axios = require("axios");
 const cookieParser = require("cookie-parser");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
+const leoProfanity = require("leo-profanity");
 
 const app = express();
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static("public"));
+
+// ── Rate limiting ──
+// In-memory only (per-process, resets on restart) — fine for a single-
+// instance POC. Without this, /search and friends have no defense against a
+// script (or a runaway client bug) running up the Claude/Google Places bill;
+// a real multi-instance deployment would want this backed by Redis instead.
+function rateLimiter({ windowMs, max }) {
+  const hits = new Map(); // ip -> timestamps[]
+  setInterval(() => {
+    const cutoff = Date.now() - windowMs;
+    for (const [ip, timestamps] of hits) {
+      const kept = timestamps.filter(t => t > cutoff);
+      if (kept.length === 0) hits.delete(ip);
+      else hits.set(ip, kept);
+    }
+  }, windowMs).unref();
+
+  return (req, res, next) => {
+    const ip = req.ip;
+    const now = Date.now();
+    const timestamps = (hits.get(ip) || []).filter(t => now - t < windowMs);
+    if (timestamps.length >= max) {
+      res.set("Retry-After", Math.ceil((windowMs - (now - timestamps[0])) / 1000));
+      return res.status(429).json({ error: "Too many requests — slow down and try again in a moment." });
+    }
+    timestamps.push(now);
+    hits.set(ip, timestamps);
+    next();
+  };
+}
+
+const aiLimiter = rateLimiter({ windowMs: 60 * 1000, max: 20 });     // /search, /ask-restaurant, /describe-restaurant — Claude + Places calls
+const placesLimiter = rateLimiter({ windowMs: 60 * 1000, max: 40 }); // /geocode, /showcase, /nearby, /place-details, /photo — Places/Geocoding only, cheaper
+const authLimiter = rateLimiter({ windowMs: 60 * 1000, max: 10 });   // /auth/google — login attempts
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -46,6 +85,44 @@ function readSession(req) {
     return null;
   }
 }
+
+// Rejects with 401 rather than silently treating the request as anonymous —
+// every route this guards (writing/deleting a review) needs a real identity
+// to attribute the review to, not a best-effort fallback.
+function requireAuth(req, res, next) {
+  const user = readSession(req);
+  if (!user) return res.status(401).json({ error: "Sign in required" });
+  req.user = user;
+  next();
+}
+
+// ── User reviews ──
+// Real, other-users-visible reviews written inside the app, distinct from
+// the Google review excerpts everything else here is grounded in — this is
+// the one place the app has its own data instead of just reflecting
+// Google's. Persisted to a plain JSON file (loaded into memory, written
+// through on every change) rather than an in-memory-only cache like
+// placeDetailsCache — losing a review someone actually wrote on every
+// server restart would be a real regression, not just a cheap-to-refetch
+// cache miss. A real deployment would want a proper database instead; a
+// single JSON file is fine for a single-process POC.
+const REVIEWS_FILE = path.join(__dirname, "data", "reviews.json");
+
+function loadReviews() {
+  try {
+    return JSON.parse(fs.readFileSync(REVIEWS_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+function saveReviews(data) {
+  fs.mkdirSync(path.dirname(REVIEWS_FILE), { recursive: true });
+  fs.writeFileSync(REVIEWS_FILE, JSON.stringify(data, null, 2));
+}
+
+let reviews = loadReviews();
+const reviewsLimiter = rateLimiter({ windowMs: 60 * 1000, max: 20 }); // write/delete only — reads are cheap and public
 
 // Fallback only — used if the browser's geolocation fails or is denied.
 // No longer assumes Osaka; leave null and require real coordinates instead.
@@ -189,9 +266,7 @@ async function fetchFromGoogle(query, analysis, userLat, userLng, radiusKm) {
   let searchTerms;
   if (analysis.dish) {
     searchTerms = [analysis.dish];
-  } else if (cuisines.length > 1) {
-    searchTerms = cuisines;
-  } else if (cuisines.length === 1) {
+  } else if (cuisines.length > 0) {
     searchTerms = cuisines;
   } else {
     searchTerms = [query];
@@ -813,7 +888,7 @@ Respond with ONLY that one sentence — no preamble, no quotation marks around i
   return extractText(response, "describeRestaurant").trim();
 }
 
-app.post("/ask-restaurant", async (req, res) => {
+app.post("/ask-restaurant", aiLimiter, async (req, res) => {
   const { placeId, name, question, tags, summary } = req.body;
   if (!placeId || !name || !question) {
     return res.status(400).json({ error: "placeId, name, and question are required" });
@@ -829,7 +904,7 @@ app.post("/ask-restaurant", async (req, res) => {
   }
 });
 
-app.post("/search", async (req, res) => {
+app.post("/search", aiLimiter, async (req, res) => {
   const userQuery = req.body.query || null;
   const previousQuery = req.body.previousQuery || null;
   const previousAnalysis = req.body.previousAnalysis || null;
@@ -966,7 +1041,7 @@ app.post("/search", async (req, res) => {
 // (e.g. a laptop with no GPS/WiFi-positioning signal falling back to ~200km-
 // accurate IP estimation), and separately useful for planning a search in a
 // city the user isn't currently in.
-app.get("/geocode", async (req, res) => {
+app.get("/geocode", placesLimiter, async (req, res) => {
   const address = req.query.address;
   if (!address) return res.status(400).json({ error: "Missing address" });
 
@@ -1003,7 +1078,7 @@ const SHOWCASE_CATEGORIES = [
   { label: "Cozy cafe", query: "cozy cafe nearby", searchTerm: "cafe" },
 ];
 
-app.get("/showcase", async (req, res) => {
+app.get("/showcase", placesLimiter, async (req, res) => {
   const { lat, lng } = req.query;
   if (!lat || !lng) return res.status(400).json({ error: "Missing lat/lng" });
 
@@ -1029,6 +1104,12 @@ app.get("/showcase", async (req, res) => {
         place_id: best.place_id,
         latitude: best.geometry?.location?.lat ?? null,
         longitude: best.geometry?.location?.lng ?? null,
+        // Text Search already returns both of these for free — no reason to
+        // make the card wait on the lazy per-marker /place-details call
+        // just to show a price range or open/closed state it already has.
+        price: priceLevel(best.price_level),
+        price_level: best.price_level ?? null,
+        open_now: best.opening_hours?.open_now ?? null,
       };
     }));
     res.json({ items: items.filter(Boolean) });
@@ -1042,7 +1123,7 @@ app.get("/showcase", async (req, res) => {
 // nearby for someone who wants to look around rather than describe what
 // they want. Same cost-conscious shape as /showcase: one Text Search call,
 // no Claude, no per-place Details — just what Google already gives back.
-app.get("/nearby", async (req, res) => {
+app.get("/nearby", placesLimiter, async (req, res) => {
   const { lat, lng } = req.query;
   if (!lat || !lng) return res.status(400).json({ error: "Missing lat/lng" });
 
@@ -1062,6 +1143,11 @@ app.get("/nearby", async (req, res) => {
         latitude: p.geometry.location.lat,
         longitude: p.geometry.location.lng,
         distance_km: getDistanceKm(Number(lat), Number(lng), p.geometry.location.lat, p.geometry.location.lng),
+        // Free on this same Text Search response — see /showcase for why
+        // this beats waiting on the lazy per-marker /place-details call.
+        price: priceLevel(p.price_level),
+        price_level: p.price_level ?? null,
+        open_now: p.opening_hours?.open_now ?? null,
       }))
       .sort((a, b) => a.distance_km - b.distance_km)
       .slice(0, 20);
@@ -1078,7 +1164,7 @@ app.get("/nearby", async (req, res) => {
 // out from the description call (below) so the popup can show hours/phone/
 // website as soon as this — the fast one, a single Google round trip —
 // resolves, instead of both waiting on the slower LLM call together.
-app.get("/place-details", async (req, res) => {
+app.get("/place-details", placesLimiter, async (req, res) => {
   const { place_id } = req.query;
   if (!place_id) return res.status(400).json({ error: "Missing place_id" });
   const details = await fetchPlaceDetails(place_id);
@@ -1090,7 +1176,7 @@ app.get("/place-details", async (req, res) => {
 // and writes the one-sentence description. Kept as its own request so the
 // client can show hours/phone/website immediately and let this arrive
 // separately, rather than blocking everything on an LLM call.
-app.post("/describe-restaurant", async (req, res) => {
+app.post("/describe-restaurant", aiLimiter, async (req, res) => {
   const { name, rating, review_count, reviews } = req.body;
   if (!name) return res.status(400).json({ error: "Missing name" });
   let description = null;
@@ -1106,7 +1192,7 @@ app.post("/describe-restaurant", async (req, res) => {
 // Google API key — the key has to go in that URL's querystring, so calling
 // it directly from the client would leak it, breaking the pattern every
 // other Google/Anthropic call in this app already follows (server-side only).
-app.get("/photo", async (req, res) => {
+app.get("/photo", placesLimiter, async (req, res) => {
   const ref = req.query.ref;
   if (!ref) return res.status(400).send("Missing ref");
 
@@ -1127,6 +1213,136 @@ app.get("/photo", async (req, res) => {
   }
 });
 
+// Public read — anyone (signed in or not, though the login gate means
+// that's moot right now) can see what other users wrote about a place.
+app.get("/reviews", placesLimiter, (req, res) => {
+  const placeId = req.query.place_id;
+  if (!placeId) return res.status(400).json({ error: "place_id is required" });
+  const forPlace = reviews
+    .filter(r => r.place_id === placeId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+  const average = forPlace.length > 0
+    ? forPlace.reduce((sum, r) => sum + r.rating, 0) / forPlace.length
+    : null;
+  res.json({ reviews: forPlace, average, count: forPlace.length });
+});
+
+// Attached review photos — real uploaded files, not Google's. Stored on
+// disk under data/ (gitignored, same as reviews.json) and served back
+// through a plain static mount below. Filenames are server-generated
+// (crypto.randomUUID(), never the client's original filename) so nothing
+// about what someone uploads can pick its own path on disk.
+const REVIEW_PHOTOS_DIR = path.join(__dirname, "data", "review-photos");
+const REVIEW_PHOTO_MIME_EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+const reviewPhotoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      fs.mkdirSync(REVIEW_PHOTOS_DIR, { recursive: true });
+      cb(null, REVIEW_PHOTOS_DIR);
+    },
+    filename: (req, file, cb) => cb(null, `${crypto.randomUUID()}.${REVIEW_PHOTO_MIME_EXT[file.mimetype]}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024, files: 3 },
+  fileFilter: (req, file, cb) => cb(null, !!REVIEW_PHOTO_MIME_EXT[file.mimetype]),
+});
+app.use("/review-photos", express.static(REVIEW_PHOTOS_DIR, { maxAge: "7d" }));
+
+// Best-effort — a review whose photo file is already gone (or never
+// finished writing) shouldn't block deleting/replacing the review itself.
+function deleteReviewPhotoFiles(photoUrls) {
+  for (const url of photoUrls || []) {
+    fs.unlink(path.join(REVIEW_PHOTOS_DIR, path.basename(url)), () => {});
+  }
+}
+
+// One review per signed-in user per place — posting again replaces your
+// own previous one (same "edit in place" shape as the personal Saved
+// rating/note) rather than piling up duplicates from the same person.
+// Always multipart (even with no photos attached) so one code path covers
+// both — see reviewPhotoUpload above.
+app.post("/reviews", reviewsLimiter, requireAuth, reviewPhotoUpload.array("photos", 3), (req, res) => {
+  const { place_id, rating, foodRating, serviceRating, atmosphereRating, text } = req.body;
+  // The overall rating is the one mandatory number — most people just want
+  // to rate the whole visit, not break it into categories. Food/service/
+  // atmosphere are optional extra detail on top of that, for whoever wants
+  // to give it (no AI involved in scoring or writing any of this, see the
+  // review-editor's own comment on that) — "rating" is exactly what the
+  // person picked for it, never derived from the category scores.
+  const ratingNum = Number(rating);
+  if (!place_id || !Number.isInteger(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+    return res.status(400).json({ error: "place_id and an overall rating from 1 to 5 are required" });
+  }
+  const categories = {};
+  for (const [key, raw] of Object.entries({ food: foodRating, service: serviceRating, atmosphere: atmosphereRating })) {
+    if (raw === undefined || raw === null || raw === "") continue;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1 || n > 5) {
+      return res.status(400).json({ error: `${key[0].toUpperCase()}${key.slice(1)} rating must be a whole number from 1 to 5` });
+    }
+    categories[key] = n;
+  }
+  const trimmedText = (text || "").trim().slice(0, 1000);
+  // Word-list based (leo-profanity's default English dictionary) — catches
+  // the obvious/common cases, not a comprehensive or context-aware
+  // solution. Rejects rather than masking with asterisks: a silently
+  // censored public review reads as broken, not moderated.
+  if (leoProfanity.check(trimmedText)) {
+    return res.status(400).json({ error: "Please remove inappropriate language from your review." });
+  }
+  const now = Date.now();
+  const existing = reviews.find(r => r.place_id === place_id && r.userId === req.user.sub);
+  // New photos this submission replace the old set entirely (simplest
+  // "edit in place" semantics, matching rating/text) — but if none were
+  // attached this time, leave whatever was already there untouched, so a
+  // quick text-only edit doesn't silently wipe someone's photos.
+  const newPhotoUrls = (req.files || []).map(f => `/review-photos/${f.filename}`);
+  if (existing) {
+    if (newPhotoUrls.length > 0) {
+      deleteReviewPhotoFiles(existing.photos);
+      existing.photos = newPhotoUrls;
+    }
+    existing.rating = ratingNum;
+    existing.foodRating = categories.food ?? null;
+    existing.serviceRating = categories.service ?? null;
+    existing.atmosphereRating = categories.atmosphere ?? null;
+    existing.text = trimmedText;
+    existing.userName = req.user.name;
+    existing.userPicture = req.user.picture;
+    existing.updatedAt = now;
+  } else {
+    reviews.push({
+      id: `${req.user.sub}:${place_id}:${now}`,
+      place_id,
+      userId: req.user.sub,
+      userName: req.user.name,
+      userPicture: req.user.picture,
+      rating: ratingNum,
+      foodRating: categories.food ?? null,
+      serviceRating: categories.service ?? null,
+      atmosphereRating: categories.atmosphere ?? null,
+      text: trimmedText,
+      photos: newPhotoUrls,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  saveReviews(reviews);
+  res.json({ ok: true });
+});
+
+// Deletes only the signed-in user's own review for this place — ownership
+// is enforced server-side by matching userId to the session, not trusted
+// from anything the client sends.
+app.delete("/reviews", reviewsLimiter, requireAuth, (req, res) => {
+  const placeId = req.query.place_id;
+  const target = reviews.find(r => r.place_id === placeId && r.userId === req.user.sub);
+  if (!target) return res.status(404).json({ error: "No review to delete" });
+  deleteReviewPhotoFiles(target.photos);
+  reviews = reviews.filter(r => r !== target);
+  saveReviews(reviews);
+  res.json({ ok: true });
+});
+
 // Client IDs aren't secret (they're meant to end up in frontend JS,
 // unlike GOOGLE_API_KEY above) — this just avoids hardcoding it into
 // index.html directly, since there's no build step to template it in.
@@ -1137,7 +1353,7 @@ app.get("/config", (req, res) => {
 // Called with the ID token from google.accounts.id's callback (see
 // index.html) — verifying it here, server-side, is what actually proves the
 // sign-in is real rather than trusting whatever the client claims.
-app.post("/auth/google", async (req, res) => {
+app.post("/auth/google", authLimiter, async (req, res) => {
   const { credential } = req.body;
   if (!credential) return res.status(400).json({ error: "Missing credential" });
   if (!GOOGLE_CLIENT_ID || !SESSION_SECRET) {

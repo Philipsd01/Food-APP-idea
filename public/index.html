@@ -5,6 +5,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Restaurant Discovery</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#8B3A1F">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
@@ -32,7 +36,7 @@
   <div class="side-menu" id="sideMenu">
     <div class="menu-header">
       <span class="menu-title">Menu</span>
-      <button class="menu-close" onclick="closeMenu()">
+      <button class="menu-close" onclick="closeMenu()" title="Close menu" aria-label="Close menu">
         <i class="ti ti-x"></i>
       </button>
     </div>
@@ -157,6 +161,10 @@
 
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="Describe what you're looking for...">
+      <!-- Hidden by default — attachVoiceInput only reveals this once it's
+           confirmed the browser actually supports speech recognition (see
+           its own comment). Never something the app depends on working. -->
+      <button class="voice-btn" id="searchVoiceBtn" hidden title="Search by voice" aria-label="Search by voice"><i class="ti ti-microphone"></i></button>
       <button class="search-btn" id="searchBtn" onclick="search()">
         <i class="ti ti-arrow-up"></i>
       </button>
@@ -209,8 +217,11 @@
     <div class="saved-categories-row" id="savedCategoriesRow"></div>
     <div class="saved-toolbar" id="savedToolbar">
       <div class="saved-sort-row" id="savedSortRow"></div>
-      <button class="saved-map-toggle" id="savedMapToggle" onclick="toggleSavedMiniMap()" title="Show on map">
+      <button class="saved-map-toggle" id="savedMapToggle" onclick="toggleSavedMiniMap()" title="Show on map" aria-label="Show this list on the map">
         <i class="ti ti-map-2"></i>
+      </button>
+      <button class="saved-map-toggle" id="savedShareBtn" onclick="shareSavedList()" title="Share this list" aria-label="Share this list">
+        <i class="ti ti-share-2"></i>
       </button>
     </div>
     <div class="saved-mini-map-wrap" id="savedMiniMapWrap" style="display: none;">
@@ -246,6 +257,42 @@
     </div>
   </div>
 
+  <!-- Write/edit a community review (see openReviewEditor) — same visual
+       shape as the personal Saved editor above, but this one posts to the
+       server (see /reviews) and is visible to every signed-in user, not
+       just you. Structured per-category ratings rather than one overall
+       number — every field here is something the person actually typed or
+       tapped themselves; no AI drafts or invents any part of a review. -->
+  <div class="save-picker-overlay" id="reviewEditorOverlay" onclick="if (event.target === this) closeReviewEditor()">
+    <div class="save-picker-card">
+      <button class="save-picker-close-btn" onclick="closeReviewEditor()" title="Close" aria-label="Close">
+        <i class="ti ti-x"></i>
+      </button>
+      <p class="save-picker-title" id="reviewEditorTitle">Write a review</p>
+      <div class="review-editor-overall" id="reviewEditorOverallStars"></div>
+      <p class="review-editor-optional-label">Rate specific things (optional)</p>
+      <div class="review-editor-categories" id="reviewEditorCategories"></div>
+      <textarea class="saved-edit-note" id="reviewEditorText" placeholder="What stood out — good or bad?" rows="3" maxlength="1000"></textarea>
+      <div class="review-editor-photos">
+        <div class="review-editor-photo-previews" id="reviewEditorPhotoPreviews"></div>
+        <label class="review-editor-photo-add" for="reviewEditorPhotoInput">
+          <i class="ti ti-camera-plus"></i> Add photos
+        </label>
+        <input type="file" id="reviewEditorPhotoInput" accept="image/*" multiple hidden onchange="handleReviewPhotoSelect(event)">
+      </div>
+      <button class="save-picker-new-btn saved-edit-save" onclick="submitReview()">Post review</button>
+      <button class="save-picker-new-btn review-editor-delete" id="reviewEditorDeleteBtn" onclick="deleteMyReview()" hidden>Delete my review</button>
+    </div>
+  </div>
+
+  <!-- Blocks the map only while the results sheet is fully up (see
+       setResultsSheetState) — at peek/mini, comparing markers on the map
+       while the list peeks below is the actual point, so it stays
+       interactive; fully up is meant to be the sole focus, same rule the
+       single-restaurant sheet's own backdrop follows. A tap here collapses
+       to mini instead of reaching the map underneath. -->
+  <div class="sheet-backdrop results-sheet-backdrop" id="resultsSheetBackdrop" onclick="handleResultsSheetBackdropTap()"></div>
+
   <!-- A real search's ranked matches, as a sheet over the always-visible
        map instead of a separate full-page list — same reasoning as the
        single-restaurant sheet, but this one is never fully dismissible
@@ -257,7 +304,7 @@
          setupResultsSheetDrag now (see its own comment): a button's native
          click firing right after pointerup was clobbering whatever the
          drag itself had just snapped to. -->
-    <button type="button" class="results-sheet-handle-row" id="resultsSheetHandleRow">
+    <button type="button" class="results-sheet-handle-row" id="resultsSheetHandleRow" aria-label="Expand or collapse the results list">
       <div class="sheet-handle"></div>
       <i class="ti ti-chevron-up results-sheet-arrow" id="resultsSheetArrow"></i>
     </button>
@@ -273,16 +320,20 @@
        still-visible map, Google Maps/Airbnb-style, instead of navigating
        away to a separate list screen — so there's no List/Map toggle
        button involved in viewing one place at all. -->
-  <!-- onclick only actually fires while .blocking is applied (see
-       openBottomSheet/handleSheetBackdropTap) — otherwise pointer-events:
-       none lets this pass taps straight through to the map's own visible
-       strip above the sheet, same reasoning as before (see
-       .sheet-backdrop.open's own comment). -->
+  <!-- Catches every tap while the sheet is open and collapses it to mini
+       instead of letting the tap reach whatever's underneath — see
+       .sheet-backdrop.open's own comment and handleSheetBackdropTap. -->
   <div class="sheet-backdrop" id="sheetBackdrop" onclick="handleSheetBackdropTap()"></div>
   <div class="bottom-sheet" id="bottomSheet">
     <div class="sheet-handle-row" id="sheetHandleRow">
-      <div class="sheet-handle"></div>
-      <button class="sheet-close-btn" onclick="closeBottomSheet()" title="Close">
+      <!-- tabindex/role/aria-label live on this inner bar rather than the
+           whole row — the row also contains the real close <button> below,
+           and a focusable/role="button" ancestor wrapping another real
+           button is an invalid nested-interactive pattern. Keydown is
+           still bound to the outer row (see setupSheetDrag), so it still
+           catches this bar's Enter/Space via normal bubbling. -->
+      <div class="sheet-handle" role="button" tabindex="0" aria-label="Expand or collapse this restaurant's details"></div>
+      <button class="sheet-close-btn" onclick="closeBottomSheet()" title="Close" aria-label="Close">
         <i class="ti ti-x"></i>
       </button>
     </div>
@@ -302,11 +353,11 @@
       <span class="route-panel-meta" id="routePanelMeta">Calculating route…</span>
     </div>
     <div class="route-panel-modes">
-      <button class="route-mode-btn" id="routeModeBtn-driving" onclick="setRouteMode('driving')" title="Drive"><i class="ti ti-car"></i></button>
-      <button class="route-mode-btn" id="routeModeBtn-cycling" onclick="setRouteMode('cycling')" title="Bike"><i class="ti ti-bike"></i></button>
-      <button class="route-mode-btn" id="routeModeBtn-walking" onclick="setRouteMode('walking')" title="Walk"><i class="ti ti-walk"></i></button>
+      <button class="route-mode-btn" id="routeModeBtn-driving" onclick="setRouteMode('driving')" title="Drive" aria-label="Route by car"><i class="ti ti-car"></i></button>
+      <button class="route-mode-btn" id="routeModeBtn-cycling" onclick="setRouteMode('cycling')" title="Bike" aria-label="Route by bike"><i class="ti ti-bike"></i></button>
+      <button class="route-mode-btn" id="routeModeBtn-walking" onclick="setRouteMode('walking')" title="Walk" aria-label="Route by foot"><i class="ti ti-walk"></i></button>
     </div>
-    <button class="route-panel-close" onclick="exitDirections()" title="Exit directions">
+    <button class="route-panel-close" onclick="exitDirections()" title="Exit directions" aria-label="Exit directions">
       <i class="ti ti-x"></i>
     </button>
   </div>
@@ -333,10 +384,10 @@
   </div>
 
   <div class="lightbox" id="lightbox" onclick="if (event.target === this) closeLightbox()">
-    <button class="lightbox-close" onclick="closeLightbox()" title="Close"><i class="ti ti-x"></i></button>
-    <button class="lightbox-nav lightbox-prev" onclick="event.stopPropagation(); lightboxStep(-1)" title="Previous"><i class="ti ti-chevron-left"></i></button>
+    <button class="lightbox-close" onclick="closeLightbox()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    <button class="lightbox-nav lightbox-prev" onclick="event.stopPropagation(); lightboxStep(-1)" title="Previous" aria-label="Previous photo"><i class="ti ti-chevron-left"></i></button>
     <img class="lightbox-img" id="lightboxImg" src="" alt="">
-    <button class="lightbox-nav lightbox-next" onclick="event.stopPropagation(); lightboxStep(1)" title="Next"><i class="ti ti-chevron-right"></i></button>
+    <button class="lightbox-nav lightbox-next" onclick="event.stopPropagation(); lightboxStep(1)" title="Next" aria-label="Next photo"><i class="ti ti-chevron-right"></i></button>
   </div>
 
   <script>
@@ -672,20 +723,28 @@
       const hasScore = typeof r.score === "number";
       const scoreClass = r.score >= 80 ? 'high' : r.score >= 50 ? 'medium' : 'low';
       const hasPrice = r.tags?.price && r.tags.price !== 'unknown' && r.tags.price !== 'Price unknown';
+      const priceLabel = hasPrice ? r.tags.price : (r.price || null);
       const ratingLabel = r.rating ? `<span class="no-wrap">★ ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>` : null;
       const meta = [
         r.tags?.cuisine ? escapeHtml(r.tags.cuisine) : null,
         formatDistance(r.distance_km),
         ratingLabel,
-        hasPrice ? escapeHtml(r.tags.price) : null,
+        priceLabel ? escapeHtml(priceLabel) : null,
       ].filter(Boolean).join(' · ');
       const description = r.summary || (r.review_quote ? `“${r.review_quote}”` : null);
       // hours_status text itself already says "Closes ..." vs "Opens ..." —
       // reading that prefix instead of a separate open_now flag means this
       // works whether r came from a real search (which sets open_now) or a
-      // browse-mode /place-details fetch (which doesn't).
+      // browse-mode /place-details fetch (which doesn't). Before that fuller
+      // fetch resolves, /nearby's own plain open_now boolean (free on the
+      // same Text Search call) is enough to show *something* instead of a
+      // skeleton the whole time.
       const hoursLine = r.hours_status
         ? `<div class="map-popup-hours ${r.hours_status.startsWith('Closes') ? 'open-now' : 'closed-now'}">${escapeHtml(r.hours_status)}</div>`
+        : r.open_now === true
+        ? `<div class="map-popup-hours open-now">Open now</div>`
+        : r.open_now === false
+        ? `<div class="map-popup-hours closed-now">Closed</div>`
         : (browseMode && !r._detailsLoaded ? `<div class="map-popup-hours"><div class="map-popup-skeleton-line"></div></div>` : '');
       // The description arrives after hours/phone/website (see
       // loadBrowseMarkerDetails) — its own loading skeleton so the popup
@@ -708,13 +767,13 @@
           <div class="map-popup-footer">
             <button class="map-popup-list-btn" onclick="${browseMode ? `deepDiveRestaurant(${index})` : `focusOnList(${index})`}">${browseMode ? 'View details' : 'View in list'}</button>
             <div class="map-popup-route-btns">
-              ${r.phone ? `<a class="map-popup-route-btn" href="tel:${escapeHtml(r.phone)}" title="Call"><i class="ti ti-phone"></i></a>` : ''}
-              ${r.website && isSafeUrl(r.website) ? `<a class="map-popup-route-btn" href="${escapeHtml(r.website)}" target="_blank" rel="noopener" title="Website"><i class="ti ti-world"></i></a>` : ''}
+              ${r.phone ? `<a class="map-popup-route-btn" href="tel:${escapeHtml(r.phone)}" title="Call" aria-label="Call ${escapeHtml(r.name)}"><i class="ti ti-phone"></i></a>` : ''}
+              ${r.website && isSafeUrl(r.website) ? `<a class="map-popup-route-btn" href="${escapeHtml(r.website)}" target="_blank" rel="noopener" title="Website" aria-label="Visit ${escapeHtml(r.name)}'s website"><i class="ti ti-world"></i></a>` : ''}
               ${(r.latitude && r.longitude) ? `
-              <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'driving')" title="Route by car"><i class="ti ti-car"></i></button>
-              <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'cycling')" title="Route by bike"><i class="ti ti-bike"></i></button>
-              <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'walking')" title="Route by foot"><i class="ti ti-walk"></i></button>
-              <button class="map-popup-route-btn" onclick="clearRoute()" title="Clear route"><i class="ti ti-x"></i></button>` : ''}
+              <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'driving')" title="Route by car" aria-label="Route by car"><i class="ti ti-car"></i></button>
+              <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'cycling')" title="Route by bike" aria-label="Route by bike"><i class="ti ti-bike"></i></button>
+              <button class="map-popup-route-btn" onclick="showRouteOnMap(${index}, 'walking')" title="Route by foot" aria-label="Route by foot"><i class="ti ti-walk"></i></button>
+              <button class="map-popup-route-btn" onclick="clearRoute()" title="Clear route" aria-label="Clear route"><i class="ti ti-x"></i></button>` : ''}
             </div>
           </div>
         </div>`;
@@ -755,8 +814,17 @@
           // gallery container loadExtraPhotos already filled in — refill it
           // (cheap: r.photos is already in memory, no fetch involved).
           loadExtraPhotos(index);
+          loadCommunityReviews(index);
+          attachAskVoiceInput(index);
         }
       }
+    }
+
+    // buildCardHtml creates a fresh ask-input/mic pair on every render —
+    // called at each of those render points, same as loadExtraPhotos and
+    // loadCommunityReviews just above.
+    function attachAskVoiceInput(index) {
+      attachVoiceInput(document.getElementById(`askInput-${index}`), document.getElementById(`askVoiceBtn-${index}`));
     }
 
     // Fires once, the first time a browse-mode marker's popup opens or its
@@ -833,8 +901,10 @@
 
     // Slides the restaurant card up over the map (Google Maps/Airbnb-style)
     // instead of swapping the whole screen to a list view. The map stays
-    // mounted and interactive underneath — nothing about it changes, so
-    // there's no separate state for a Map/List button to lose track of.
+    // mounted underneath (still there once the sheet closes/collapses), but
+    // isn't interactive while the sheet is actually up — see
+    // .sheet-backdrop.open — so there's no separate state for a Map/List
+    // button to lose track of.
     function openBottomSheet(index) {
       const r = currentResults[index];
       if (!r) return;
@@ -854,21 +924,13 @@
       // the moment someone taps it open, instead of a visible pop-in delay
       // right as the gallery reveals.
       loadExtraPhotos(index);
+      loadCommunityReviews(index);
+      attachAskVoiceInput(index);
       // Full, not peek — tapping "View details" is a deliberate request to
       // actually see the restaurant, not a glance, so it should open at the
       // size that's actually the point of opening it at all. Dragging or
       // tapping the handle afterward still moves freely between all three.
       setBottomSheetState('full');
-      // The map strip left visible above the sheet is deliberately still
-      // interactive (pan/tap markers) — see .sheet-backdrop's own comment.
-      // The Saved page has no such reason to stay interactive behind the
-      // sheet (tapping a different saved card under it isn't "browsing a
-      // map," it's just an accidental background tap) — this makes the
-      // backdrop actually catch those taps and collapse to mini instead of
-      // letting them silently reach whatever's underneath, same outcome as
-      // tapping empty map already gets you (see the map's own click
-      // handler in initMap).
-      document.getElementById('sheetBackdrop').classList.toggle('blocking', !document.getElementById('savedView').hidden);
       const marker = markers[index];
       if (marker && marker.isPopupOpen()) marker.closePopup();
       // Nudges the marker into the strip of map that stays visible above
@@ -895,13 +957,12 @@
     function closeBottomSheet() {
       setBottomSheetState('closed');
       document.getElementById('bottomSheet').style.transform = '';
-      document.getElementById('sheetBackdrop').classList.remove('blocking');
       singleCardIndex = null;
     }
 
-    // Backdrop tap while it's actively blocking (see openBottomSheet) —
-    // same "collapse to mini, don't close outright" behavior tapping the
-    // map itself already gets.
+    // Backdrop tap while the sheet is peek/full (see .sheet-backdrop.open)
+    // — collapses to mini rather than closing outright, so the sheet stays
+    // one tap away instead of having to be reopened from scratch.
     function handleSheetBackdropTap() {
       if (bottomSheetState !== 'mini') setBottomSheetState('mini');
     }
@@ -919,11 +980,16 @@
       sheet.classList.toggle('mini', state === 'mini');
       sheet.classList.toggle('peek', state === 'peek');
       sheet.classList.toggle('full', state === 'full');
+      const backdrop = document.getElementById('sheetBackdrop');
       // Backdrop only dims once there's enough sheet to actually cover the
       // map — at mini, the map underneath should stay fully interactive.
-      document.getElementById('sheetBackdrop').classList.toggle(
-        'open', state === 'peek' || state === 'full'
-      );
+      backdrop.classList.toggle('open', state === 'peek' || state === 'full');
+      // Blocking (see .sheet-backdrop.open.blocking) is stricter than the
+      // dim above — only 'full' actually locks out the map/Saved page
+      // underneath. 'peek' still just dims, same as it always has; the map
+      // underneath stays interactive since that's a deliberate half-open
+      // glance, not the sheet's full focus.
+      backdrop.classList.toggle('blocking', state === 'full');
     }
 
     // Same drag-to-nearest pattern as setupResultsSheetDrag, applied to the
@@ -981,6 +1047,15 @@
 
       handle.addEventListener('pointerup', endDrag);
       handle.addEventListener('pointercancel', endDrag);
+
+      // Keyboard equivalent of a tap — the drag itself only ever listens
+      // for pointer events (see above), so Enter/Space on a focused handle
+      // did nothing at all until now.
+      handle.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        setBottomSheetState(bottomSheetState === 'full' ? 'mini' : 'full');
+      });
     })();
 
     const TAG_FIELDS = [
@@ -1004,11 +1079,11 @@
       // first.
       const constraintTags = TAG_FIELDS
         .filter(t => a[t.field])
-        .map(t => `<span class="card-tag ${t.cls} removable-tag" onclick="removeConstraint('${t.field}')" title="Remove">${escapeHtml(a[t.field])} <i class="ti ti-x"></i></span>`)
+        .map(t => `<span class="card-tag ${t.cls} removable-tag" role="button" tabindex="0" onclick="removeConstraint('${t.field}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();removeConstraint('${t.field}');}" title="Remove" aria-label="Remove ${escapeHtml(a[t.field])} filter">${escapeHtml(a[t.field])} <i class="ti ti-x"></i></span>`)
         .join("");
 
       const mustNotTags = (a.must_not || [])
-        .map(item => `<span class="card-tag excluded removable-tag" onclick="removeMustNot('${escapeHtml(item.replace(/'/g, "\\'"))}')" title="Remove">no ${escapeHtml(item)} <i class="ti ti-x"></i></span>`)
+        .map(item => `<span class="card-tag excluded removable-tag" role="button" tabindex="0" onclick="removeMustNot('${escapeHtml(item.replace(/'/g, "\\'"))}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();removeMustNot('${escapeHtml(item.replace(/'/g, "\\'"))}');}" title="Remove" aria-label="Remove exclusion: ${escapeHtml(item)}">no ${escapeHtml(item)} <i class="ti ti-x"></i></span>`)
         .join("");
 
       return constraintTags + mustNotTags;
@@ -1116,6 +1191,7 @@
       // number a user can actually cross-check against Maps/TripAdvisor.
       if (r.rating) cardTagsHtml += `<span class="card-tag rating"><i class="ti ti-star-filled"></i> ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>`;
       if (r.tags?.price) cardTagsHtml += `<span class="card-tag price">${escapeHtml(r.tags.price)}</span>`;
+      else if (r.price) cardTagsHtml += `<span class="card-tag price">${escapeHtml(r.price)}</span>`;
       const distanceLabel = formatDistance(r.distance_km);
       if (distanceLabel) cardTagsHtml += `<span class="card-tag highlight">${distanceLabel}</span>`;
       // hours_status ("Closes 10 PM", "Opens 11 AM tomorrow") comes from
@@ -1196,7 +1272,8 @@
           <div class="ask-box" onclick="event.stopPropagation()">
             <div class="ask-row">
               <input type="text" class="ask-input" id="askInput-${index}" placeholder="Ask about this place..." onkeydown="if(event.key==='Enter') askRestaurantQuestion(${index})">
-              <button class="ask-btn" onclick="askRestaurantQuestion(${index})" title="Ask"><i class="ti ti-send"></i></button>
+              <button class="ask-btn voice-btn" id="askVoiceBtn-${index}" hidden title="Ask by voice" aria-label="Ask by voice"><i class="ti ti-microphone"></i></button>
+              <button class="ask-btn" onclick="askRestaurantQuestion(${index})" title="Ask" aria-label="Ask a question about this restaurant"><i class="ti ti-send"></i></button>
             </div>
             <p class="ask-answer" id="askAnswer-${index}"></p>
           </div>` : "";
@@ -1207,6 +1284,13 @@
       // loading photos for cards nobody opens.
       const hasExtraPhotos = r.photos && r.photos.filter(p => p !== r.photo_reference).length > 0;
       const galleryHtml = hasExtraPhotos ? `<div class="photo-gallery" id="photoGallery-${index}"></div>` : "";
+
+      // Real, other-users-visible reviews (see loadCommunityReviews) —
+      // fetched lazily on expand, same reasoning as galleryHtml above: no
+      // reason to fire a /reviews call for every card in a results list
+      // nobody's actually opened. Gated on place_id like askBoxHtml, since
+      // that's the same key /reviews is stored under.
+      const communityReviewsHtml = r.place_id ? `<div class="community-reviews" id="communityReviews-${index}"></div>` : "";
 
       // Same summary/quote fallback the map popup uses (see makePopupHtml)
       // — a browse-mode r has no Claude-written "why this matched" summary,
@@ -1226,7 +1310,7 @@
           <div class="card-header">
             <span class="card-name">${safeName}</span>
             <div class="card-header-right">
-              <button class="save-heart-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); handleSaveHeartClick(${index}, this)" title="${isSaved ? 'Remove from saved' : 'Save'}">
+              <button class="save-heart-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); handleSaveHeartClick(${index}, this)" title="${isSaved ? 'Remove from saved' : 'Save'}" aria-label="${isSaved ? 'Remove from saved' : 'Save'}">
                 <i class="ti ti-heart${isSaved ? '-filled' : ''}"></i>
               </button>
               ${hasScore ? `<span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${escapeHtml(scoreHint(r.score))}"` : ''}>${label}</span>` : ''}
@@ -1237,6 +1321,7 @@
           ${summaryHtml}
           ${galleryHtml}
           ${evidenceHtml}
+          ${communityReviewsHtml}
           ${askBoxHtml}
           <div class="card-footer">
             <div class="card-actions">
@@ -1284,6 +1369,8 @@
       cardEl.classList.toggle('expanded', !wasExpanded);
       if (!wasExpanded) {
         loadExtraPhotos(index);
+        loadCommunityReviews(index);
+        attachAskVoiceInput(index);
         // Expanding reveals photos/reviews/ask-box below the card, which can
         // land off-screen with no hint there's more — 'nearest' only moves
         // the page if the card isn't already fully visible, so a tap near
@@ -1308,6 +1395,291 @@
       galleryEl.innerHTML = extra.map(p =>
         `<img class="gallery-photo" src="/photo?ref=${encodeURIComponent(p.ref)}" alt="" loading="lazy" onerror="this.remove()" onclick="event.stopPropagation(); openLightboxFromCard(${index}, ${p.pos})">`
       ).join("");
+    }
+
+    // --- Community reviews (see /reviews on the server) — real reviews
+    // other users wrote inside the app, not Google's. Fetched lazily per
+    // card, same reasoning as loadExtraPhotos above.
+    async function loadCommunityReviews(index) {
+      const r = currentResults[index];
+      const el = document.getElementById(`communityReviews-${index}`);
+      if (!r || !el || el.dataset.loaded) return;
+      el.dataset.loaded = "true";
+      el.innerHTML = `<p class="community-reviews-loading">Loading reviews…</p>`;
+      try {
+        const res = await fetch(`/reviews?place_id=${encodeURIComponent(r.place_id)}`);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        // Cached on r so openReviewEditor can tell "is this mine already"
+        // without a second round trip.
+        r._communityReviews = data.reviews || [];
+        renderCommunityReviews(index, r._communityReviews, data.average, data.count || 0);
+      } catch (e) {
+        el.innerHTML = "";
+        el.dataset.loaded = ""; // allow a retry next time the card re-expands
+      }
+    }
+
+    function renderCommunityReviews(index, list, average, count) {
+      const r = currentResults[index];
+      const el = document.getElementById(`communityReviews-${index}`);
+      if (!r || !el) return;
+      const mine = currentUser ? list.find(rv => rv.userId === currentUser.sub) : null;
+      const titleText = count > 0 ? `Community reviews · ★${average.toFixed(1)} (${count})` : 'Community reviews';
+      const emptyHint = count === 0 ? `<p class="community-reviews-empty">No reviews yet — be the first.</p>` : '';
+      const itemsHtml = list.map(rv => {
+        // rv.rating is the average of whichever category scores were
+        // actually rated (see POST /reviews) and so isn't always a whole
+        // number — round to the nearest star for the glyph count rather
+        // than truncating.
+        const filled = Math.round(rv.rating);
+        // Only categories that were actually rated appear here — see
+        // POST /reviews' comment on why not all three are required.
+        const breakdown = ['food', 'service', 'atmosphere']
+          .filter(key => rv[`${key}Rating`] != null)
+          .map(key => `${key[0].toUpperCase()}${key.slice(1)} ${rv[`${key}Rating`]}`)
+          .join(' · ');
+        const isMine = currentUser && rv.userId === currentUser.sub;
+        const photosHtml = (rv.photos && rv.photos.length > 0) ? `
+          <div class="community-review-photos">
+            ${rv.photos.map(url => `<img class="community-review-photo" src="${escapeHtml(url)}" alt="" loading="lazy" onclick="event.stopPropagation(); window.open('${escapeHtml(url)}', '_blank')">`).join("")}
+          </div>` : '';
+        return `
+        <div class="community-review">
+          <div class="community-review-header">
+            ${rv.userPicture ? `<img class="community-review-avatar" src="${escapeHtml(rv.userPicture)}" alt="">` : `<div class="community-review-avatar community-review-avatar-empty"></div>`}
+            <div class="community-review-meta">
+              <span class="community-review-name">${escapeHtml(rv.userName || 'Someone')}</span>
+              <span class="community-review-stars">${'★'.repeat(filled)}${'☆'.repeat(5 - filled)}</span>
+            </div>
+            ${isMine ? `<button type="button" class="community-review-share-btn" onclick="event.stopPropagation(); shareMyReview(${index})" title="Share your review" aria-label="Share your review"><i class="ti ti-share-2"></i></button>` : ''}
+          </div>
+          ${breakdown ? `<p class="community-review-breakdown">${escapeHtml(breakdown)}</p>` : ''}
+          ${rv.text ? `<p class="community-review-text">${escapeHtml(rv.text)}</p>` : ''}
+          ${photosHtml}
+        </div>`;
+      }).join("");
+      el.innerHTML = `
+        <div class="community-reviews-header">
+          <span class="community-reviews-title">${escapeHtml(titleText)}</span>
+          <button type="button" class="community-review-write-btn" onclick="event.stopPropagation(); openReviewEditor(${index})">${mine ? 'Edit your review' : 'Write a review'}</button>
+        </div>
+        ${emptyHint}
+        <div class="community-review-list">${itemsHtml}</div>`;
+    }
+
+    let reviewEditorIndex = null;
+    const REVIEW_CATEGORIES = [
+      { key: 'food', label: 'Food' },
+      { key: 'service', label: 'Service' },
+      { key: 'atmosphere', label: 'Atmosphere' },
+    ];
+    // Overall is the one mandatory rating — most people just want to rate
+    // the whole visit, not break it into categories (see POST /reviews'
+    // own comment on this). Food/service/atmosphere are optional extra
+    // detail on top, for whoever wants to give it.
+    let reviewEditorOverall = 0;
+    let reviewEditorRatings = { food: 0, service: 0, atmosphere: 0 };
+    const MAX_REVIEW_PHOTOS = 3;
+    let reviewEditorExistingPhotos = []; // URLs already on the review (server-side), kept unless replaced
+    let reviewEditorPhotoFiles = [];     // freshly-picked File objects, not yet uploaded
+
+    function openReviewEditor(index) {
+      if (!currentUser) {
+        showToast("Sign in to write a review");
+        return;
+      }
+      const r = currentResults[index];
+      if (!r || !r.place_id) return;
+      reviewEditorIndex = index;
+      const existing = (r._communityReviews || []).find(rv => rv.userId === currentUser.sub);
+      reviewEditorOverall = existing ? (existing.rating || 0) : 0;
+      reviewEditorRatings = {
+        food: existing ? (existing.foodRating || 0) : 0,
+        service: existing ? (existing.serviceRating || 0) : 0,
+        atmosphere: existing ? (existing.atmosphereRating || 0) : 0,
+      };
+      reviewEditorExistingPhotos = existing ? (existing.photos || []) : [];
+      reviewEditorPhotoFiles = [];
+      document.getElementById('reviewEditorTitle').textContent = existing ? `Edit your review of ${r.name}` : `Review ${r.name}`;
+      document.getElementById('reviewEditorText').value = existing ? (existing.text || '') : '';
+      document.getElementById('reviewEditorDeleteBtn').hidden = !existing;
+      renderReviewEditorOverallStars();
+      renderReviewEditorCategories();
+      renderReviewEditorPhotoPreviews();
+      document.getElementById('reviewEditorOverlay').classList.add('open');
+    }
+
+    function closeReviewEditor() {
+      document.getElementById('reviewEditorOverlay').classList.remove('open');
+      reviewEditorIndex = null;
+    }
+
+    // New picks replace the existing-photos preview entirely (matches
+    // submitReview's own replace-not-merge semantics) — capped client-side
+    // so someone gets an immediate "too many" toast instead of finding out
+    // only after the upload round trip.
+    function handleReviewPhotoSelect(e) {
+      const files = Array.from(e.target.files || []);
+      e.target.value = ''; // lets the same file be re-picked later if removed
+      for (const f of files) {
+        if (reviewEditorPhotoFiles.length >= MAX_REVIEW_PHOTOS) {
+          showToast(`Up to ${MAX_REVIEW_PHOTOS} photos per review`);
+          break;
+        }
+        if (f.type.startsWith('image/')) reviewEditorPhotoFiles.push(f);
+      }
+      renderReviewEditorPhotoPreviews();
+    }
+
+    function removeReviewEditorPhoto(i) {
+      reviewEditorPhotoFiles.splice(i, 1);
+      renderReviewEditorPhotoPreviews();
+    }
+
+    function renderReviewEditorPhotoPreviews() {
+      const el = document.getElementById('reviewEditorPhotoPreviews');
+      if (!el) return;
+      // Once any new photo is picked, it takes over the slot entirely —
+      // showing both would misrepresent what submitReview is about to send
+      // (the existing set only survives if nothing new was picked).
+      const existingHtml = reviewEditorPhotoFiles.length === 0
+        ? reviewEditorExistingPhotos.map(url => `<div class="review-editor-photo-thumb"><img src="${escapeHtml(url)}" alt=""></div>`).join("")
+        : "";
+      const newHtml = reviewEditorPhotoFiles.map((f, i) => `
+        <div class="review-editor-photo-thumb">
+          <img src="${URL.createObjectURL(f)}" alt="">
+          <button type="button" class="review-editor-photo-remove" onclick="removeReviewEditorPhoto(${i})" aria-label="Remove this photo"><i class="ti ti-x"></i></button>
+        </div>`
+      ).join("");
+      el.innerHTML = existingHtml + newHtml;
+    }
+
+    function setReviewEditorOverallRating(n) {
+      reviewEditorOverall = reviewEditorOverall === n ? 0 : n;
+      renderReviewEditorOverallStars();
+    }
+
+    function renderReviewEditorOverallStars() {
+      const el = document.getElementById('reviewEditorOverallStars');
+      if (!el) return;
+      const stars = [1, 2, 3, 4, 5].map(n =>
+        `<i class="ti ti-star${n <= reviewEditorOverall ? '-filled' : ''} review-editor-overall-star" role="button" tabindex="0" onclick="setReviewEditorOverallRating(${n})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setReviewEditorOverallRating(${n});}" aria-label="Overall rating ${n} star${n > 1 ? 's' : ''}"></i>`
+      ).join("");
+      el.innerHTML = `<span class="review-editor-overall-label">Overall</span><div class="review-editor-overall-row">${stars}</div>`;
+    }
+
+    function setReviewEditorRating(category, n) {
+      reviewEditorRatings[category] = reviewEditorRatings[category] === n ? 0 : n;
+      renderReviewEditorCategories();
+    }
+
+    // One star row per category (see REVIEW_CATEGORIES) instead of a single
+    // overall rating — re-rendered as a whole on every tap rather than
+    // patching one row in place, same as renderSavedEditStars did before
+    // there was more than one row to keep in sync.
+    function renderReviewEditorCategories() {
+      const el = document.getElementById('reviewEditorCategories');
+      if (!el) return;
+      el.innerHTML = REVIEW_CATEGORIES.map(({ key, label }) => {
+        const current = reviewEditorRatings[key];
+        const stars = [1, 2, 3, 4, 5].map(n =>
+          `<i class="ti ti-star${n <= current ? '-filled' : ''} saved-edit-star" role="button" tabindex="0" onclick="setReviewEditorRating('${key}', ${n})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setReviewEditorRating('${key}', ${n});}" aria-label="${label} ${n} star${n > 1 ? 's' : ''}"></i>`
+        ).join("");
+        return `
+          <div class="review-editor-category">
+            <span class="review-editor-category-label">${label}</span>
+            <div class="saved-edit-stars">${stars}</div>
+          </div>`;
+      }).join("");
+    }
+
+    // Reloads this card's review list from the server after a write/delete,
+    // rather than patching the cached r._communityReviews client-side — the
+    // server is the one source of truth here (unlike Saved, which is purely
+    // local), so it's worth the extra round trip to stay honest.
+    function refreshCommunityReviews(index) {
+      const el = document.getElementById(`communityReviews-${index}`);
+      if (el) el.dataset.loaded = "";
+      loadCommunityReviews(index);
+    }
+
+    async function submitReview() {
+      if (reviewEditorIndex === null) return;
+      const index = reviewEditorIndex;
+      const r = currentResults[index];
+      if (!r || !r.place_id) return;
+      if (reviewEditorOverall < 1) {
+        showToast("Pick an overall rating first");
+        return;
+      }
+      const text = document.getElementById('reviewEditorText').value.trim();
+      // FormData, not JSON — the photo files have to ride along in the same
+      // request as the rating/text fields (see POST /reviews' multer
+      // middleware), and a zero-rated category is sent as an empty field
+      // rather than 0, matching the server's "absent = not rated" check.
+      const formData = new FormData();
+      formData.append('place_id', r.place_id);
+      formData.append('rating', reviewEditorOverall);
+      REVIEW_CATEGORIES.forEach(({ key }) => {
+        if (reviewEditorRatings[key] >= 1) formData.append(`${key}Rating`, reviewEditorRatings[key]);
+      });
+      formData.append('text', text);
+      reviewEditorPhotoFiles.forEach(f => formData.append('photos', f));
+      try {
+        // No Content-Type header — the browser sets the multipart boundary
+        // itself from the FormData body, and setting it manually here
+        // would omit that boundary and break parsing on the server.
+        const res = await fetch('/reviews', { method: 'POST', body: formData });
+        if (!res.ok) {
+          // Surfaces the server's actual reason (e.g. the profanity check)
+          // rather than a generic message someone would just retry as-is
+          // and hit again.
+          const data = await res.json().catch(() => null);
+          showToast(data?.error || "Couldn't post your review — try again");
+          return;
+        }
+        closeReviewEditor();
+        refreshCommunityReviews(index);
+        showToast("Review posted");
+      } catch (e) {
+        showToast("Couldn't post your review — try again");
+      }
+    }
+
+    async function deleteMyReview() {
+      if (reviewEditorIndex === null) return;
+      const index = reviewEditorIndex;
+      const r = currentResults[index];
+      if (!r || !r.place_id) return;
+      if (!window.confirm("Delete your review?")) return;
+      try {
+        const res = await fetch(`/reviews?place_id=${encodeURIComponent(r.place_id)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+        closeReviewEditor();
+        refreshCommunityReviews(index);
+        showToast("Review deleted");
+      } catch (e) {
+        showToast("Couldn't delete your review — try again");
+      }
+    }
+
+    // Shares just the signed-in user's own review — reuses the same real
+    // Web Share API / clipboard-fallback shape as shareRestaurant and
+    // shareSavedList (see restaurantMapsUrl/shareOrCopy) rather than a
+    // third copy of that logic.
+    async function shareMyReview(index) {
+      const r = currentResults[index];
+      if (!r || !currentUser) return;
+      const mine = (r._communityReviews || []).find(rv => rv.userId === currentUser.sub);
+      if (!mine) return;
+      const breakdown = ['food', 'service', 'atmosphere']
+        .filter(key => mine[`${key}Rating`] != null)
+        .map(key => `${key[0].toUpperCase()}${key.slice(1)}: ${mine[`${key}Rating`]}★`)
+        .join(', ');
+      const text = `My review of ${r.name}${breakdown ? ` (${breakdown})` : ''}${mine.text ? `: "${mine.text}"` : ''}`;
+      const mapsUrl = restaurantMapsUrl(r);
+      await shareOrCopy({ title: r.name, text, url: mapsUrl }, `${text} ${mapsUrl}`, "Review copied");
     }
 
     let lightboxPhotos = [];
@@ -1456,6 +1828,120 @@
       document.getElementById("maxResultsLabel").textContent = maxResults;
     }
 
+    // --- Voice input (Web Speech API) — browser-native speech-to-text, no
+    // server round trip or Claude call involved in the transcription
+    // itself. Support is real in Chrome/Edge but spotty-to-absent in
+    // Safari/iOS, so this is a progressive enhancement: every mic button
+    // starts [hidden] in HTML and attachVoiceInput only reveals one once
+    // this constructor is confirmed to exist, never something the app
+    // requires to function. Also needs a secure context (HTTPS, or
+    // localhost while developing) for the mic permission prompt at all —
+    // same requirement the PWA install already relies on.
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    // Fills inputEl with the transcript and stops there — like typing, it
+    // doesn't auto-submit, so a misheard word can be reviewed/edited before
+    // whatever the input triggers (search, ask) actually runs.
+    function attachVoiceInput(inputEl, micBtnEl) {
+      if (!SpeechRecognitionCtor || !inputEl || !micBtnEl) return;
+      micBtnEl.hidden = false;
+
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = navigator.language || 'en-US';
+      // Deliberately NOT continuous — Chrome's continuous+interimResults
+      // combination is a known-flaky pairing in practice: the mic visibly
+      // stays open longer (which looks like progress) but onresult can
+      // just stop firing at all, silently. Sticking with the well-tested
+      // single-phrase path (continuous defaults to false) and instead
+      // restarting it on every 'end' (below) gets the same "keeps
+      // listening through pauses" effect without that failure mode.
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      // Chrome's own internal "how long to wait for speech before giving
+      // up on this segment" timer isn't exposed by the API at all, and
+      // runs to something like 7-8 seconds in practice — far too long to
+      // rely on for deciding when someone's actually done talking. This
+      // timer takes that decision over entirely: it's reset on every real
+      // result and, if it ever fires, stops recognition itself rather than
+      // waiting for Chrome's own (much slower) 'end' to get around to it.
+      const SILENCE_TIMEOUT_MS = 3000;
+      let listening = false;
+      let userStopped = false;
+      let finalTranscript = '';
+      let silenceTimer = null;
+
+      function scheduleSilenceStop() {
+        clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+          userStopped = true; // same flag the mic button uses — don't auto-restart after this
+          recognition.stop();
+        }, SILENCE_TIMEOUT_MS);
+      }
+
+      recognition.addEventListener('result', (e) => {
+        scheduleSilenceStop();
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const chunk = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalTranscript += chunk + ' ';
+          else interim += chunk;
+        }
+        inputEl.value = (finalTranscript + interim).trim();
+      });
+      recognition.addEventListener('end', () => {
+        // Chrome ends each phrase segment on its own even outside
+        // continuous mode — restarting here (unless the mic button was
+        // tapped, or the silence timer above already stopped things) is
+        // what actually carries listening across a normal pause,
+        // accumulating into finalTranscript above instead of replacing it
+        // each time.
+        if (listening && !userStopped) {
+          try {
+            recognition.start();
+            return;
+          } catch (err) {
+            // Already starting, or genuinely can't restart — fall through
+            // and treat this as done rather than leaving the button stuck.
+          }
+        }
+        listening = false;
+        clearTimeout(silenceTimer);
+        micBtnEl.classList.remove('listening');
+        inputEl.focus();
+      });
+      recognition.addEventListener('error', (e) => {
+        // 'no-speech' fires constantly during normal pauses between
+        // sentences — not a real failure, just let the 'end' handler above
+        // (which always follows) decide whether to restart or stop.
+        if (e.error === 'no-speech') return;
+        userStopped = true;
+      });
+
+      micBtnEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (listening) {
+          userStopped = true;
+          clearTimeout(silenceTimer);
+          recognition.stop();
+          return;
+        }
+        finalTranscript = '';
+        inputEl.value = '';
+        userStopped = false;
+        listening = true;
+        micBtnEl.classList.add('listening');
+        scheduleSilenceStop(); // also covers "said nothing at all" — not just gaps after real speech
+        try {
+          recognition.start();
+        } catch (err) {
+          // Already running, or mic permission denied — either way, don't
+          // leave the button stuck showing "listening".
+          listening = false;
+          micBtnEl.classList.remove('listening');
+        }
+      });
+    }
+
     async function search(directAnalysis) {
       const query = directAnalysis ? "" : searchInput.value.trim();
       if (!directAnalysis && !query) return;
@@ -1578,7 +2064,7 @@
         console.error(err);
         // Nothing left to show once the skeleton clears — a big empty
         // floating sheet over the map would look broken, not just empty.
-        if (!resultsBox.innerHTML) document.getElementById('resultsSheet').hidden = true;
+        if (!resultsBox.innerHTML) hideResultsSheet();
       } finally {
         isLoading = false;
         loading.style.display = "none";
@@ -1628,7 +2114,7 @@
       // The results sheet only makes sense once there's a real search to
       // show — closeBottomSheet handles the single-restaurant one, this is
       // that same idea for the multi-result one.
-      document.getElementById('resultsSheet').hidden = true;
+      hideResultsSheet();
       closeBottomSheet();
       clearRoute();
       error.style.display = "none";
@@ -1691,7 +2177,7 @@
       container.innerHTML = history.map((h, i) =>
         `<div class="menu-item history-item" onclick="rerunHistoryEntry(${i})">
           <span>${escapeHtml(h.label)}</span>
-          <i class="ti ti-x" onclick="event.stopPropagation(); deleteHistoryEntry(${i})"></i>
+          <i class="ti ti-x" role="button" tabindex="0" onclick="event.stopPropagation(); deleteHistoryEntry(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();deleteHistoryEntry(${i});}" aria-label="Delete this search"></i>
         </div>`
       ).join("");
     }
@@ -1862,17 +2348,21 @@
     // resort) rather than faking the button. Desktop browsers mostly don't
     // implement navigator.share, so those fall back to copying the same
     // link to the clipboard instead.
-    async function shareRestaurant(index) {
-      const r = currentResults[index];
-      if (!r) return;
-      const mapsUrl = r.place_id
+    function restaurantMapsUrl(r) {
+      return r.place_id
         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name)}&query_place_id=${encodeURIComponent(r.place_id)}`
         : (r.latitude && r.longitude)
           ? `https://www.google.com/maps/search/?api=1&query=${r.latitude},${r.longitude}`
           : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name + (r.location ? ", " + r.location : ""))}`;
+    }
+
+    // Shared by shareRestaurant (one restaurant) and shareSavedList (a whole
+    // category) — same real-Web-Share-API-with-clipboard-fallback shape
+    // either way, just different share payloads and copy.
+    async function shareOrCopy(shareData, fallbackText, copiedMessage) {
       if (navigator.share) {
         try {
-          await navigator.share({ title: r.name, text: r.name, url: mapsUrl });
+          await navigator.share(shareData);
         } catch (e) {
           // AbortError just means the user backed out of the share sheet —
           // not an actual failure worth surfacing.
@@ -1880,11 +2370,38 @@
         return;
       }
       try {
-        await navigator.clipboard.writeText(mapsUrl);
-        showToast("Link copied");
+        await navigator.clipboard.writeText(fallbackText);
+        showToast(copiedMessage);
       } catch (e) {
-        window.prompt("Copy this link:", mapsUrl);
+        window.prompt("Copy this:", fallbackText);
       }
+    }
+
+    async function shareRestaurant(index) {
+      const r = currentResults[index];
+      if (!r) return;
+      const mapsUrl = restaurantMapsUrl(r);
+      await shareOrCopy({ title: r.name, text: r.name, url: mapsUrl }, mapsUrl, "Link copied");
+    }
+
+    // Shares the currently filtered/sorted Saved category as a plain text
+    // list (one line per restaurant, each with its own Maps link) — there's
+    // no backend behind Saved restaurants (see loadSavedRestaurants), so
+    // there's no real "list" URL to hand someone; this is the same honest
+    // shape shareRestaurant already uses for a single restaurant, just
+    // folded into one multi-line share instead of one link.
+    async function shareSavedList() {
+      const items = getSortedSavedItems();
+      if (items.length === 0) {
+        showToast("Nothing to share yet");
+        return;
+      }
+      const activeCat = loadSavedCategories().find(c => c.id === activeSavedCategoryId);
+      const label = activeSavedCategoryId === 'all'
+        ? 'My saved restaurants'
+        : `My "${activeCat ? activeCat.name : 'saved'}" list`;
+      const text = `${label}:\n${items.map((r, i) => `${i + 1}. ${r.name} — ${restaurantMapsUrl(r)}`).join('\n')}`;
+      await shareOrCopy({ title: label, text }, text, "List copied");
     }
 
     // Minimal transient confirmation — reused for any future "did that
@@ -1967,7 +2484,7 @@
       activeMapIndex = null;
       clearRoute();
       // Mutually exclusive with a real search's results sheet.
-      document.getElementById('resultsSheet').hidden = true;
+      hideResultsSheet();
       currentResults = [r];
       // Same sheet a map deep dive gets, over the plain home screen instead
       // of the map — no reason "peek at one restaurant" should feel like a
@@ -2091,13 +2608,24 @@
         // Delete is a small "x" that only shows up on the active, non-built-in
         // chip — no separate "manage categories" screen needed for a POC.
         const removable = active && c.id !== 'all' && c.id !== 'liked';
+        // A remove icon nested inside the select <button> was unreachable by
+        // keyboard/screen reader (an interactive element inside another
+        // interactive element never gets its own stop in the tab order) —
+        // the removable case splits into two real, sibling <button>s inside
+        // a plain wrapping div instead, so each is independently focusable.
+        if (removable) {
+          return `
+            <div class="saved-cat-chip removable active">
+              <button type="button" class="saved-cat-chip-select" onclick="selectSavedCategory('${c.id}')">${escapeHtml(c.name)} <span class="saved-cat-count">${countFor(c.id)}</span></button>
+              <button type="button" class="saved-cat-remove" onclick="deleteCategory('${c.id}')" aria-label="Delete category ${escapeHtml(c.name)}"><i class="ti ti-x"></i></button>
+            </div>`;
+        }
         return `
-          <button class="saved-cat-chip ${active ? 'active' : ''}" onclick="selectSavedCategory('${c.id}')">
+          <button type="button" class="saved-cat-chip ${active ? 'active' : ''}" onclick="selectSavedCategory('${c.id}')">
             ${escapeHtml(c.name)} <span class="saved-cat-count">${countFor(c.id)}</span>
-            ${removable ? `<i class="ti ti-x saved-cat-remove" onclick="event.stopPropagation(); deleteCategory('${c.id}')"></i>` : ''}
           </button>`;
       }).join("");
-      el.innerHTML = chips + `<button class="saved-cat-chip saved-cat-add" onclick="promptAddCategory()" title="New category"><i class="ti ti-plus"></i></button>`;
+      el.innerHTML = chips + `<button type="button" class="saved-cat-chip saved-cat-add" onclick="promptAddCategory()" title="New category" aria-label="New category"><i class="ti ti-plus"></i></button>`;
     }
 
     function renderSavedViewList() {
@@ -2138,8 +2666,8 @@
               ${noteHtml}
             </div>
             <div class="saved-list-actions">
-              <i class="ti ti-pencil saved-list-edit" onclick="event.stopPropagation(); openSavedEditor('${escapedName}')" title="Add a note or rating"></i>
-              <i class="ti ti-x saved-list-remove" onclick="event.stopPropagation(); confirmUnsaveRestaurant('${escapedName}')"></i>
+              <i class="ti ti-pencil saved-list-edit" role="button" tabindex="0" onclick="event.stopPropagation(); openSavedEditor('${escapedName}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();openSavedEditor('${escapedName}');}" title="Add a note or rating" aria-label="Add a note or rating for ${escapeHtml(r.name)}"></i>
+              <i class="ti ti-x saved-list-remove" role="button" tabindex="0" onclick="event.stopPropagation(); confirmUnsaveRestaurant('${escapedName}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();confirmUnsaveRestaurant('${escapedName}');}" aria-label="Remove ${escapeHtml(r.name)} from saved"></i>
             </div>
           </div>`;
       }).join("");
@@ -2177,7 +2705,7 @@
       const el = document.getElementById('savedEditStars');
       if (!el) return;
       el.innerHTML = [1, 2, 3, 4, 5].map(n =>
-        `<i class="ti ti-star${n <= editingSavedRating ? '-filled' : ''} saved-edit-star" onclick="setSavedEditRating(${n})"></i>`
+        `<i class="ti ti-star${n <= editingSavedRating ? '-filled' : ''} saved-edit-star" role="button" tabindex="0" onclick="setSavedEditRating(${n})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();setSavedEditRating(${n});}" aria-label="${n} star${n > 1 ? 's' : ''}"></i>`
       ).join("");
     }
 
@@ -2364,6 +2892,19 @@
       if (topBtn) topBtn.title = label === 'List' ? 'Back to list' : 'Browse nearby on the map';
     }
 
+    // Every path leaving a real search (browse mode, a saved/showcase deep
+    // dive, Home, or a failed search with nothing to show) hides the
+    // results sheet this way — its own backdrop only ever gets set via
+    // setResultsSheetState, so hiding the sheet without also resetting the
+    // backdrop left it stuck dimmed (and blocking the map underneath, if
+    // the search happened to leave 'full') for the rest of the session,
+    // regardless of what actually replaced it.
+    function hideResultsSheet() {
+      document.getElementById('resultsSheet').hidden = true;
+      const backdrop = document.getElementById('resultsSheetBackdrop');
+      backdrop.classList.remove('open', 'blocking');
+    }
+
     // Moves the real-search results sheet between its three states — never
     // fully closed (see resultsSheetState's own comment), just how much of
     // the map is visible above it. Clearing any inline height first matters
@@ -2388,7 +2929,18 @@
       // search, "View in list", the bottom nav's List toggle) un-hides it
       // in one place instead of each needing to know about that class.
       sheet.classList.remove('route-hidden');
+      // Only 'full' dims/blocks the map underneath — peek/mini deliberately
+      // leave it interactive, since comparing markers while the list peeks
+      // below is the actual point of that state (see
+      // .results-sheet-backdrop's own comment).
+      const resultsBackdrop = document.getElementById('resultsSheetBackdrop');
+      resultsBackdrop.classList.toggle('open', state === 'full');
+      resultsBackdrop.classList.toggle('blocking', state === 'full');
       updateMapNavIcon();
+    }
+
+    function handleResultsSheetBackdropTap() {
+      if (resultsSheetState !== 'mini') setResultsSheetState('mini');
     }
 
     // Discrete peek<->full toggle — used by the bottom nav's Map/List
@@ -2484,6 +3036,14 @@
 
       handle.addEventListener('pointerup', endDrag);
       handle.addEventListener('pointercancel', endDrag);
+
+      // Keyboard equivalent of a tap — same reasoning as the single-
+      // restaurant sheet's own handle (see setupSheetDrag).
+      handle.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        setResultsSheetState(resultsSheetState === 'full' ? 'mini' : 'full');
+      });
     })();
 
     // Entry point for someone who'd rather just look at what's around than
@@ -2549,7 +3109,7 @@
       clearRoute();
       // The results sheet is a real-search-only thing — browse mode uses
       // the single-restaurant sheet instead (see openBottomSheet).
-      document.getElementById('resultsSheet').hidden = true;
+      hideResultsSheet();
 
       switchView();
 
@@ -2664,23 +3224,32 @@
         L.control.zoom({ position: 'bottomright' }).addTo(map);
         map.on('zoomend', updateMarkerLabelVisibility);
         // Tapping empty map — not a marker, Leaflet doesn't bubble those
-        // clicks up to the map itself — drops whichever sheet is currently
-        // showing (results list or the browse-mode single-restaurant sheet)
-        // all the way to mini, same as tapping the stock list behind Apple's
-        // Stocks app panel sends that panel to its own smallest state rather
-        // than just one step down. Maximizes the map instead of leaving a
-        // peek-sized strip of the sheet still sitting over it. The two
-        // sheets are mutually exclusive (deepDiveRestaurant only opens the
-        // bottom-sheet while browseMode is true), so only one branch here
-        // ever actually applies at once.
+        // clicks up to the map itself — drops the results sheet all the way
+        // to mini, same as tapping the stock list behind Apple's Stocks app
+        // panel sends that panel to its own smallest state rather than just
+        // one step down. Maximizes the map instead of leaving a peek-sized
+        // strip of the sheet still sitting over it. Only relevant outside
+        // browse mode now — the single-restaurant sheet's own backdrop
+        // fully blocks the map underneath while it's open (see
+        // .sheet-backdrop.open), so a click never reaches the map at all
+        // in that case; this branch would be unreachable dead code.
         map.on('click', () => {
           if (!browseMode && resultsSheetState !== 'mini') setResultsSheetState('mini');
-          if (browseMode && bottomSheetState !== 'closed' && bottomSheetState !== 'mini') setBottomSheetState('mini');
         });
       } else {
         markers.forEach(m => m.remove());
         markers = [];
-        clearRoute();
+        // Not clearRoute() here — every real caller (search, viewSavedRestaurant,
+        // viewShowcaseRestaurant, browseNearbyOnMap) already clears the route
+        // itself before ever reaching this point, so it was pure redundancy for
+        // them. For showRouteOnMap specifically it was actively harmful: it sets
+        // routeTargetIndex synchronously, then calls switchView(), whose own
+        // setTimeout lands here (map already exists, markers just got cleared by
+        // viewSavedRestaurant) — clearing the route AGAIN, asynchronously,
+        // wiped out routeTargetIndex moments after showRouteOnMap had just set
+        // it, so drawRoute() ran against a null target and silently did nothing.
+        // Only reproduced on a *second* Directions tap in the same session
+        // (map already existing is what put this branch in play at all).
         if (results.length > 0 && results[0].latitude) {
           map.setView([results[0].latitude, results[0].longitude], 15);
         }
@@ -2935,6 +3504,20 @@
           // for attention instead of the panel reading as the one clear
           // place to look.
           routeLine = L.polyline(routes[0].coordinates, { color: '#8B3A1F', weight: 4, opacity: 0.8 }).addTo(map);
+          // This OSRM callback lands an unpredictable amount of time (a real
+          // network round trip) after showRouteOnMap's own invalidateSize —
+          // fine normally, but the very first time this flow runs from a
+          // context where the map had never been shown before this exact
+          // call (e.g. Directions straight from a saved restaurant, which
+          // never puts the map on screen until now), Leaflet's cached
+          // container size can still be stale by the time this fires,
+          // making fitBounds compute against the wrong dimensions and
+          // settle back on roughly the restaurant alone instead of the
+          // whole route. Refreshing right here, immediately before
+          // fitBounds actually runs, means it's always sized correctly
+          // regardless of how the map got on screen or how long the route
+          // request took.
+          map.invalidateSize();
           map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
           document.getElementById('routePanelMeta').textContent = label;
         }
@@ -3357,7 +3940,7 @@
       activeMapIndex = null;
       clearRoute();
       // Mutually exclusive with a real search's results sheet.
-      document.getElementById('resultsSheet').hidden = true;
+      hideResultsSheet();
       currentResults = [{ ...item }];
       // See the identical comment in viewSavedRestaurant — the map has to
       // actually exist for openBottomSheet's pan-to-marker logic and for
@@ -3504,6 +4087,13 @@
 
     restoreSession();
     initGoogleSignIn();
+    attachVoiceInput(searchInput, document.getElementById('searchVoiceBtn'));
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
   </script>
 </body>
 

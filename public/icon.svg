@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#8B3A1F"/>
+
+  <!-- open menu card -->
+  <rect x="88" y="96" width="336" height="320" rx="20" fill="#F1ECE2"/>
+  <line x1="256" y1="96" x2="256" y2="416" stroke="#8B3A1F" stroke-width="8"/>
+
+  <!-- left page: text scribbles + a photo box -->
+  <line x1="120" y1="150" x2="210" y2="150" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+  <line x1="120" y1="180" x2="228" y2="180" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+  <line x1="120" y1="210" x2="196" y2="210" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+  <rect x="120" y="246" width="58" height="44" rx="8" fill="none" stroke="#8B3A1F" stroke-width="10"/>
+  <line x1="120" y1="322" x2="220" y2="322" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+  <line x1="120" y1="352" x2="200" y2="352" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- right page: text scribbles + a price box -->
+  <line x1="302" y1="150" x2="392" y2="150" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+  <line x1="302" y1="180" x2="376" y2="180" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+  <rect x="302" y="212" width="58" height="44" rx="8" fill="none" stroke="#8B3A1F" stroke-width="10"/>
+  <line x1="302" y1="288" x2="398" y2="288" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+  <line x1="302" y1="318" x2="368" y2="318" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+  <line x1="302" y1="348" x2="390" y2="348" stroke="#8B3A1F" stroke-width="12" stroke-linecap="round"/>
+</svg>
