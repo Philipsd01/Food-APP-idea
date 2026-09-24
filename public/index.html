@@ -14,7 +14,12 @@
   <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
   <link rel="stylesheet" href="style.css">
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- ?hl=en pins the rendered button's own text (e.g. "Sign in with
+       Google") to English regardless of the visitor's browser/OS language —
+       without it, Google picks the locale itself and it comes out
+       translated (e.g. "Log ind med Google" on a Danish system), which
+       doesn't match the rest of this English-only app. -->
+  <script src="https://accounts.google.com/gsi/client?hl=en" async defer></script>
 </head>
 
 <body>
@@ -48,13 +53,6 @@
         <i class="ti ti-chevron-down section-arrow"></i>
       </div>
       <div class="menu-section-items">
-        <div id="accountSignedOut">
-          <!-- Filled in by google.accounts.id.renderButton (see
-               initGoogleSignIn) — Google's own button, not a custom one, so
-               it stays visually consistent with every other Google Sign-In
-               button and Google can keep it current on their end. -->
-          <div id="googleSignInBtn" class="google-signin-btn"></div>
-        </div>
         <div id="accountSignedIn" class="account-profile" hidden>
           <img id="accountAvatar" class="account-avatar" alt="">
           <div class="account-info">
@@ -67,11 +65,6 @@
           </div>
         </div>
       </div>
-    </div>
-
-    <div class="menu-item" onclick="resetSearch(); closeMenu();">
-      <i class="ti ti-refresh"></i>
-      <span>New Search</span>
     </div>
 
     <div class="menu-section">
@@ -105,14 +98,6 @@
       </div>
     </div>
 
-    <!-- Saved restaurants moved to their own page (see #savedView) — this
-         is just an entry point into it now, not a duplicate list to keep in
-         sync with that page's categories. -->
-    <div class="menu-item" onclick="closeMenu(); openSavedSection();">
-      <i class="ti ti-heart"></i>
-      <span>Saved Restaurants</span>
-    </div>
-
     <div class="menu-section">
       <div class="menu-section-label" onclick="toggleSection(this)">
         <i class="ti ti-settings"></i>
@@ -144,11 +129,11 @@
     </div>
 
     <div class="menu-footer">
-      <div class="menu-item" onclick="closeMenu()">
+      <div class="menu-item" onclick="closeMenu(); openAboutOverlay();">
         <i class="ti ti-info-circle"></i>
         <span>About</span>
       </div>
-      <p class="menu-version">v0.1.0 — Demo</p>
+      <p class="menu-version">v0.1.0 (Demo)</p>
     </div>
   </div>
 
@@ -156,7 +141,6 @@
     <div class="header-decor" id="headerDecor">
       <p class="header-label">discover</p>
       <p class="header-title">Search smarter, eat better</p>
-      <p class="header-subtitle" id="headerSubtitle" style="display: none;">Understands &ldquo;quiet ramen for a rainy date night&rdquo; — not just keywords.</p>
     </div>
 
     <div class="search-box">
@@ -174,6 +158,24 @@
       <button class="search-btn" id="searchBtn" onclick="search()">
         <i class="ti ti-arrow-up"></i>
       </button>
+    </div>
+
+    <!-- First-run coachmark (see showOnboardingTour) — a single step for
+         now, pointed at the search bar since that's the one genuinely
+         non-obvious thing (plain language, not keywords). The Next button
+         already works as a real "advance to step N" control (see
+         advanceOnboardingTour) even though there's currently only one step,
+         so adding more steps later is just data, not new plumbing. -->
+    <div class="onboarding-backdrop" id="onboardingBackdrop"></div>
+    <div class="onboarding-tooltip" id="onboardingTooltip" hidden>
+      <div class="onboarding-tooltip-arrow"></div>
+      <div class="onboarding-tooltip-body">
+        <p class="onboarding-tooltip-text" id="onboardingTooltipText"></p>
+        <div class="onboarding-tooltip-actions">
+          <span class="onboarding-tooltip-step" id="onboardingTooltipStep"></span>
+          <button class="onboarding-tooltip-next" id="onboardingTooltipNext" onclick="advanceOnboardingTour()">Next</button>
+        </div>
+      </div>
     </div>
 
     <div class="start-screen-extra" id="startScreenExtra" style="display: none;">
@@ -256,7 +258,7 @@
     <div class="save-picker-card">
       <p class="save-picker-title" id="savedEditTitle">Your notes</p>
       <div class="saved-edit-stars" id="savedEditStars"></div>
-      <textarea class="saved-edit-note" id="savedEditNote" placeholder="Anything worth remembering — a dish, a table, next time…" rows="3"></textarea>
+      <textarea class="saved-edit-note" id="savedEditNote" placeholder="Anything worth remembering, like a dish or a table you liked…" rows="3"></textarea>
       <button class="save-picker-new-btn saved-edit-save" onclick="saveSavedEdit()">Save</button>
     </div>
   </div>
@@ -276,7 +278,7 @@
       <div class="review-editor-overall" id="reviewEditorOverallStars"></div>
       <p class="review-editor-optional-label">Rate specific things (optional)</p>
       <div class="review-editor-categories" id="reviewEditorCategories"></div>
-      <textarea class="saved-edit-note" id="reviewEditorText" placeholder="What stood out — good or bad?" rows="3" maxlength="1000"></textarea>
+      <textarea class="saved-edit-note" id="reviewEditorText" placeholder="What stood out, good or bad?" rows="3" maxlength="1000"></textarea>
       <div class="review-editor-photos">
         <div class="review-editor-photo-previews" id="reviewEditorPhotoPreviews"></div>
         <label class="review-editor-photo-add" for="reviewEditorPhotoInput">
@@ -286,6 +288,29 @@
       </div>
       <button class="save-picker-new-btn saved-edit-save" onclick="submitReview()">Post review</button>
       <button class="save-picker-new-btn review-editor-delete" id="reviewEditorDeleteBtn" onclick="deleteMyReview()" hidden>Delete my review</button>
+    </div>
+  </div>
+
+  <!-- About sheet (see openAboutOverlay) — the menu's "About" row used to
+       just close the menu with nothing to show; this is that content
+       instead of a button that does nothing. Same bottom-sheet pattern as
+       the other save-picker overlays above, for visual consistency. -->
+  <div class="save-picker-overlay" id="aboutOverlay" onclick="if (event.target === this) closeAboutOverlay()">
+    <div class="save-picker-card about-card">
+      <button class="save-picker-close-btn" onclick="closeAboutOverlay()" title="Close" aria-label="Close">
+        <i class="ti ti-x"></i>
+      </button>
+      <img class="about-icon" src="icon.svg" alt="">
+      <p class="save-picker-title about-app-name">Restaurant Discovery</p>
+      <p class="about-tagline">Search smarter, eat better.</p>
+      <p class="about-description">Describe what you're craving in plain language (mood, budget, occasion) and get matched restaurants nearby, backed by real Google reviews.</p>
+      <p class="about-section-label">Powered by</p>
+      <ul class="about-credits">
+        <li>Claude (Anthropic), which understands your search and writes the summaries</li>
+        <li>Google Places, for restaurant data, ratings and reviews</li>
+        <li>OpenStreetMap / Leaflet, for maps and routing</li>
+      </ul>
+      <p class="about-version">v0.1.0 (Demo)</p>
     </div>
   </div>
 
@@ -646,7 +671,7 @@
         resetBtn.hidden = false;
       } else if (userLatitude != null && userLongitude != null) {
         statusEl.textContent = usedApproximateLocation
-          ? "Auto-detected, but imprecise — consider setting it manually"
+          ? "Auto-detected, but imprecise, consider setting it manually"
           : "Auto-detected from your device";
         resetBtn.hidden = true;
       } else {
@@ -1429,7 +1454,7 @@
       if (!r || !el) return;
       const mine = currentUser ? list.find(rv => rv.userId === currentUser.sub) : null;
       const titleText = count > 0 ? `Community reviews · ★${average.toFixed(1)} (${count})` : 'Community reviews';
-      const emptyHint = count === 0 ? `<p class="community-reviews-empty">No reviews yet — be the first.</p>` : '';
+      const emptyHint = count === 0 ? `<p class="community-reviews-empty">No reviews yet. Be the first.</p>` : '';
       const itemsHtml = list.map(rv => {
         // rv.rating is the average of whichever category scores were
         // actually rated (see POST /reviews) and so isn't always a whole
@@ -1516,6 +1541,14 @@
     function closeReviewEditor() {
       document.getElementById('reviewEditorOverlay').classList.remove('open');
       reviewEditorIndex = null;
+    }
+
+    function openAboutOverlay() {
+      document.getElementById('aboutOverlay').classList.add('open');
+    }
+
+    function closeAboutOverlay() {
+      document.getElementById('aboutOverlay').classList.remove('open');
     }
 
     // New picks replace the existing-photos preview entirely (matches
@@ -1639,14 +1672,14 @@
           // rather than a generic message someone would just retry as-is
           // and hit again.
           const data = await res.json().catch(() => null);
-          showToast(data?.error || "Couldn't post your review — try again");
+          showToast(data?.error || "Couldn't post your review, try again");
           return;
         }
         closeReviewEditor();
         refreshCommunityReviews(index);
         showToast("Review posted");
       } catch (e) {
-        showToast("Couldn't post your review — try again");
+        showToast("Couldn't post your review, try again");
       }
     }
 
@@ -1663,7 +1696,7 @@
         refreshCommunityReviews(index);
         showToast("Review deleted");
       } catch (e) {
-        showToast("Couldn't delete your review — try again");
+        showToast("Couldn't delete your review, try again");
       }
     }
 
@@ -2057,7 +2090,7 @@
         const tagsHtml = renderTags(a);
 
         const locationWarningHtml = usedApproximateLocation
-          ? `<div class="analysis-interpretation" style="color:#a45c28;">⚠ Your location looks imprecise (network-based or low-confidence GPS) — results may be centered on the wrong area.</div>`
+          ? `<div class="analysis-interpretation" style="color:#a45c28;">⚠ Your location looks imprecise (network-based or low-confidence GPS). Results may be centered on the wrong area.</div>`
           : "";
 
         analysisBox.innerHTML = `
@@ -2171,8 +2204,16 @@
       updateMapNavIcon();
     }
 
+    // Accordion, not independent toggles — having Account/Location/History/
+    // Settings all open at once (the old behavior) pushed About and
+    // everything below it off-screen. Closing every other section before
+    // opening this one keeps at most one expanded, same as re-tapping an
+    // already-open section just closes it rather than doing nothing.
     function toggleSection(label) {
-      label.parentElement.classList.toggle("open");
+      const section = label.parentElement;
+      const wasOpen = section.classList.contains("open");
+      document.querySelectorAll(".menu-section.open").forEach(s => s.classList.remove("open"));
+      if (!wasOpen) section.classList.add("open");
     }
 
     // --- Search History (localStorage only — no accounts/backend needed for a POC) ---
@@ -2448,7 +2489,7 @@
       const label = activeSavedCategoryId === 'all'
         ? 'My saved restaurants'
         : `My "${activeCat ? activeCat.name : 'saved'}" list`;
-      const text = `${label}:\n${items.map((r, i) => `${i + 1}. ${r.name} — ${restaurantMapsUrl(r)}`).join('\n')}`;
+      const text = `${label}:\n${items.map((r, i) => `${i + 1}. ${r.name}: ${restaurantMapsUrl(r)}`).join('\n')}`;
       await shareOrCopy({ title: label, text }, text, "List copied");
     }
 
@@ -3141,7 +3182,7 @@
       }
       const got = await ensureLocation();
       if (!got || userLatitude == null || userLongitude == null) {
-        error.textContent = "Couldn't get your location — set one manually from the menu to browse the map.";
+        error.textContent = "Couldn't get your location. Set one manually from the menu to browse the map.";
         error.style.display = "block";
         return;
       }
@@ -3467,7 +3508,7 @@
         // Saved page/single-restaurant sheet both render on top of and
         // would just silently bury this. showToast is fixed-position and
         // visible regardless of what's currently on screen.
-        showToast("Couldn't get your location — set one manually from the menu");
+        showToast("Couldn't get your location. Set one manually from the menu");
         return;
       }
 
@@ -3896,7 +3937,6 @@
       // that without needing a separate "have they seen this" flag.
       const isReturningUser = loadSearchHistory().length > 0;
       document.getElementById('howItWorks').style.display = isReturningUser ? 'none' : 'flex';
-      document.getElementById('headerSubtitle').style.display = isReturningUser ? 'none' : 'block';
       renderFrontSaved();
 
       wheelAngle = 0;
@@ -3917,8 +3957,6 @@
       wheelInterval = null;
       const el = document.getElementById('startScreenExtra');
       if (el) el.style.display = 'none';
-      const subtitle = document.getElementById('headerSubtitle');
-      if (subtitle) subtitle.style.display = 'none';
     }
 
     // Saved restaurants, front and center on the start screen instead of
@@ -4025,9 +4063,7 @@
     let currentUser = null;
 
     function renderAccountUI() {
-      const signedOut = document.getElementById('accountSignedOut');
       const signedIn = document.getElementById('accountSignedIn');
-      signedOut.hidden = !!currentUser;
       signedIn.hidden = !currentUser;
       if (currentUser) {
         document.getElementById('accountAvatar').src = currentUser.picture || '';
@@ -4052,6 +4088,10 @@
           currentUser = data.user;
           renderAccountUI();
           document.getElementById('loginGate').hidden = true;
+          // Only fires from an actual sign-in, not restoreSession() on a
+          // plain reload with an existing cookie — so it shows once per
+          // real login rather than on every visit.
+          showOnboardingTour();
         } else {
           console.error('Google sign-in failed:', data.error);
         }
@@ -4073,9 +4113,50 @@
       // the menu's own signed-out state, since staying on the app screen
       // after signing out would contradict the whole point of gating it.
       document.getElementById('loginGate').hidden = false;
+      setOnboardingTourOpen(false);
       // Otherwise Google's own One Tap/auto-select would just sign the same
       // account straight back in without actually asking.
       if (window.google?.accounts?.id) google.accounts.id.disableAutoSelect();
+    }
+
+    // First-run coachmark, pointed at the search bar — that's the one thing
+    // about this app that isn't obvious just from looking at it (plain
+    // language, not keyword search). Kept as a steps array with a real
+    // advance/dismiss flow even though there's only one step right now, so
+    // trying an actual multi-step tour later is just adding entries here,
+    // not rebuilding the mechanics.
+    const ONBOARDING_STEPS = [
+      { text: 'Type what you\'re craving in plain language, like <em>"cozy pizza place for a rainy night"</em>, instead of just keywords.' },
+    ];
+    let onboardingStepIndex = 0;
+
+    // Toggles the tooltip and its dimming backdrop together — same
+    // open/close split as .sheet-backdrop's own 'open' class, just applied
+    // to a second element (the tooltip) instead of one.
+    function setOnboardingTourOpen(open) {
+      document.getElementById('onboardingTooltip').hidden = !open;
+      document.getElementById('onboardingBackdrop').classList.toggle('open', open);
+    }
+
+    function showOnboardingTour() {
+      onboardingStepIndex = 0;
+      renderOnboardingStep();
+      setOnboardingTourOpen(true);
+    }
+
+    function renderOnboardingStep() {
+      const step = ONBOARDING_STEPS[onboardingStepIndex];
+      document.getElementById('onboardingTooltipText').innerHTML = step.text;
+      document.getElementById('onboardingTooltipStep').textContent = `${onboardingStepIndex + 1} of ${ONBOARDING_STEPS.length}`;
+    }
+
+    function advanceOnboardingTour() {
+      onboardingStepIndex++;
+      if (onboardingStepIndex >= ONBOARDING_STEPS.length) {
+        setOnboardingTourOpen(false);
+        return;
+      }
+      renderOnboardingStep();
     }
 
     // Restores the signed-in state on a fresh page load — the session
@@ -4101,10 +4182,9 @@
     // come from the server (see /config's own comment for why), so this
     // can't just run inline at parse time. Retries briefly rather than
     // failing outright if the script hasn't finished loading yet by the
-    // time /config resolves. Renders into both button slots that might be
-    // showing right now — the gate (first-time/signed-out visitors) and the
-    // menu's Account section (defensive fallback; normally unreachable
-    // signed-out once the gate is blocking everything else).
+    // time /config resolves. Only renders into the gate's button slot — the
+    // menu's Account section is unreachable while signed out (the gate
+    // blocks the whole app first), so it has no button of its own anymore.
     async function initGoogleSignIn() {
       let googleClientId;
       try {
@@ -4130,10 +4210,6 @@
       google.accounts.id.renderButton(
         document.getElementById('googleSignInBtnGate'),
         { theme: 'filled_black', size: 'large', shape: 'pill', width: 260 }
-      );
-      google.accounts.id.renderButton(
-        document.getElementById('googleSignInBtn'),
-        { theme: 'outline', size: 'medium', shape: 'pill', width: 220 }
       );
     }
 
