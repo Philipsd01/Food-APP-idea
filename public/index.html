@@ -406,7 +406,7 @@
       <i class="ti ti-heart"></i>
       <span>Saved</span>
     </button>
-    <button class="bottom-nav-btn" id="navMenu" onclick="openMenu()" title="Menu">
+    <button class="bottom-nav-btn" id="navMenu" onclick="toggleMenu()" title="Menu">
       <i class="ti ti-menu-2"></i>
       <span>Menu</span>
     </button>
@@ -2160,6 +2160,16 @@
     function closeMenu() {
       document.getElementById("sideMenu").classList.remove("open");
       document.getElementById("menuOverlay").classList.remove("open");
+    }
+
+    // Lets the bottom-nav Menu button close the menu on a second tap, not
+    // just open it — the reachable spot on a one-handed phone grip is the
+    // bottom of the screen, so being able to tap the same button you opened
+    // it with (instead of reaching up to the X or the overlay) is the easy
+    // way to back out.
+    function toggleMenu() {
+      const isOpen = document.getElementById("sideMenu").classList.contains("open");
+      if (isOpen) closeMenu(); else openMenu();
     }
 
     // Bottom-nav "Saved" shortcut — its own full page now (see #savedView),
