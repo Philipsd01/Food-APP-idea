@@ -124,6 +124,95 @@ function saveReviews(data) {
 let reviews = loadReviews();
 const reviewsLimiter = rateLimiter({ windowMs: 60 * 1000, max: 20 }); // write/delete only — reads are cheap and public
 
+// ── Reservations ──
+// Email-based, not a real booking integration — the app emails the
+// restaurant a request with one-click confirm/decline links, and whichever
+// link staff click decides the status. Same JSON-file persistence as
+// reviews.json above, for the same reason: a pending request someone
+// actually sent shouldn't vanish on a server restart.
+const RESERVATIONS_FILE = path.join(__dirname, "data", "reservations.json");
+
+function loadReservations() {
+  try {
+    return JSON.parse(fs.readFileSync(RESERVATIONS_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+function saveReservations(data) {
+  fs.mkdirSync(path.dirname(RESERVATIONS_FILE), { recursive: true });
+  fs.writeFileSync(RESERVATIONS_FILE, JSON.stringify(data, null, 2));
+}
+
+let reservations = loadReservations();
+// Tighter than reviewsLimiter — every POST here sends a real email to a
+// third party, so a runaway client is spamming a restaurant's inbox, not
+// just our own disk.
+const reservationsLimiter = rateLimiter({ windowMs: 60 * 1000, max: 10 });
+
+// Optional — without RESEND_API_KEY the confirm/decline links are logged to
+// the console instead of emailed (see sendReservationEmail), so the whole
+// flow can be clicked through locally without a real email account.
+// BASE_URL is what those links point at: it has to be publicly reachable
+// for a restaurant to click it from their inbox, localhost only works for
+// testing on this machine.
+// Known restaurant emails, keyed by place_id: { email, source, updatedAt }.
+// Google Places has no email field at all, so this is how the Reserve
+// modal gets pre-filled — from an address someone already used here
+// ("user"), one a restaurant actually answered a request at ("confirmed",
+// the strongest signal it's right), or one found on the restaurant's own
+// website ("website", see findEmailOnWebsite). email: null records a
+// website lookup that found nothing, so the same dead end isn't re-crawled
+// on every tap (see EMAIL_LOOKUP_MISS_TTL_MS).
+const RESTAURANT_EMAILS_FILE = path.join(__dirname, "data", "restaurant-emails.json");
+
+function loadRestaurantEmails() {
+  try {
+    return JSON.parse(fs.readFileSync(RESTAURANT_EMAILS_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveRestaurantEmails(data) {
+  fs.mkdirSync(path.dirname(RESTAURANT_EMAILS_FILE), { recursive: true });
+  fs.writeFileSync(RESTAURANT_EMAILS_FILE, JSON.stringify(data, null, 2));
+}
+
+let restaurantEmails = loadRestaurantEmails();
+
+// Higher wins, and nothing overwrites an address a restaurant has actually
+// responded at. A typed address ranks *below* the website's own: it's
+// unverified, and one user's typo (or a made-up address) would otherwise
+// replace a correct pre-fill for every guest after them. It only sticks
+// where the website had nothing, or once the restaurant clicks through
+// from it (→ "confirmed").
+const EMAIL_SOURCE_RANK = { user: 1, website: 2, confirmed: 3 };
+
+// Someone sending the request to their own address (testing the flow, or
+// just misunderstanding the field) must never teach the app that this is
+// the restaurant's email — least of all as "confirmed" once they click
+// their own Confirm link.
+function isCustomersOwnEmail(email, reservation) {
+  const e = (email || "").trim().toLowerCase();
+  return !!e && (e === (reservation.customer_email || "").toLowerCase() || e === (reservation.contact_info || "").trim().toLowerCase());
+}
+
+function rememberRestaurantEmail(placeId, email, source) {
+  if (!placeId || !email) return;
+  const existing = restaurantEmails[placeId];
+  // Same rank replaces (a newer typed address beats an older typed one);
+  // a lower rank never does.
+  if (existing?.email && (EMAIL_SOURCE_RANK[existing.source] || 0) > EMAIL_SOURCE_RANK[source]) return;
+  restaurantEmails[placeId] = { email: email.toLowerCase(), source, updatedAt: Date.now() };
+  saveRestaurantEmails(restaurantEmails);
+}
+
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const RESERVATION_FROM_EMAIL = process.env.RESERVATION_FROM_EMAIL || "reservations@resend.dev";
+const BASE_URL = (process.env.BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
+
 // Fallback only — used if the browser's geolocation fails or is denied.
 // No longer assumes Osaka; leave null and require real coordinates instead.
 const DEFAULT_LAT = null;
@@ -1342,6 +1431,572 @@ app.delete("/reviews", reviewsLimiter, requireAuth, (req, res) => {
   reviews = reviews.filter(r => r !== target);
   saveReviews(reviews);
   res.json({ ok: true });
+});
+
+// Server-side twin of index.html's escapeHtml — every value that goes into
+// the reservation email (name, notes, contact info...) is either typed by
+// the customer or Google-sourced, and ends up rendered as HTML in a
+// restaurant's mail client.
+const EMAIL_ESCAPE_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+function escapeForEmail(str) {
+  if (str === null || str === undefined) return "";
+  return String(str).replace(/[&<>"']/g, (c) => EMAIL_ESCAPE_MAP[c]);
+}
+
+// Stub — returns the text unchanged for now. Meant to be wired up to DeepL
+// later; callers already treat "came back identical" as "no translation
+// available", so swapping the body in is the only change needed.
+async function translateText(text, targetLang) {
+  return text;
+}
+
+// The tokens are the only thing that authorizes a confirm/decline (see the
+// /reservations/confirm route) — nothing the app itself returns to the
+// browser should ever contain them, or the customer could confirm their own
+// request.
+function publicReservation(r) {
+  const { confirm_token, decline_token, ...rest } = r;
+  return rest;
+}
+
+// "2026-09-25" → "Friday 25 September 2026" (or the restaurant's own
+// language for the translated copy). Parsed as UTC and formatted in UTC so
+// the server's own timezone can never shift it a day either way. Falls
+// back to the raw string for anything that isn't a plain YYYY-MM-DD.
+function formatReservationDate(dateStr, locale = "en-GB") {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || "")) return dateStr;
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  // Round-trip check: Date quietly rolls "2026-02-29" over to 1 March,
+  // which would tell the restaurant a date the guest never picked.
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== dateStr) return dateStr;
+  try {
+    return new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(d);
+  } catch {
+    return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(d);
+  }
+}
+
+function buildReservationEmailBody(r, labels, confirmUrl, declineUrl, locale = "en-GB") {
+  const row = (label, value) => `
+    <tr>
+      <td style="padding:6px 12px 6px 0;color:#6b5f55;vertical-align:top;">${escapeForEmail(label)}</td>
+      <td style="padding:6px 0;color:#1a1715;">${escapeForEmail(value)}</td>
+    </tr>`;
+  return `
+    <p style="margin:0 0 12px;">${escapeForEmail(labels.intro)}</p>
+    <table style="border-collapse:collapse;font-size:14px;margin:0 0 18px;">
+      ${row(labels.date, formatReservationDate(r.date, locale))}
+      ${row(labels.time, r.time)}
+      ${row(labels.partySize, r.party_size)}
+      ${row(labels.name, r.customer_name)}
+      ${row(labels.contact, r.contact_info)}
+      ${r.notes ? row(labels.notes, r.notes) : ""}
+    </table>
+    <p style="margin:0 0 20px;">
+      <a href="${escapeForEmail(confirmUrl)}" style="display:inline-block;background:#2e7d32;color:#fff;text-decoration:none;padding:10px 20px;border-radius:999px;font-weight:600;margin-right:8px;">${escapeForEmail(labels.confirm)}</a>
+      <a href="${escapeForEmail(declineUrl)}" style="display:inline-block;background:#c62828;color:#fff;text-decoration:none;padding:10px 20px;border-radius:999px;font-weight:600;">${escapeForEmail(labels.decline)}</a>
+    </p>
+    <p style="margin:0 0 20px;font-size:13px;color:#6b5f55;">${escapeForEmail(labels.replyHint)}</p>`;
+}
+
+// Calls Resend's HTTP API directly through axios (already a dependency)
+// rather than pulling in their SDK for one POST. Throws on a failed send so
+// the caller can refuse to record a request the restaurant never received.
+async function sendReservationEmail(r) {
+  const confirmUrl = `${BASE_URL}/reservations/confirm?token=${r.confirm_token}`;
+  const declineUrl = `${BASE_URL}/reservations/decline?token=${r.decline_token}`;
+
+  if (!RESEND_API_KEY) {
+    console.log(`[reservations] RESEND_API_KEY not set, not emailing ${r.restaurant_email}. Links for reservation ${r.id}:`);
+    console.log(`  Confirm: ${confirmUrl}`);
+    console.log(`  Decline: ${declineUrl}`);
+    return;
+  }
+
+  const englishLabels = {
+    intro: `You have a new reservation request for ${r.restaurant_name}.`,
+    date: "Date", time: "Time", partySize: "Party size", name: "Name",
+    contact: "Contact", notes: "Notes", confirm: "Confirm", decline: "Decline",
+    // Reply already reaches the guest (see reply_to below), but nothing in
+    // a typical email says so — without this, staff with a question would
+    // assume it's a no-reply robot and not bother.
+    replyHint: `Questions? Just reply to this email to reach ${r.customer_name || "the guest"} directly.`,
+  };
+  let html = buildReservationEmailBody(r, englishLabels, confirmUrl, declineUrl);
+
+  // Translated copy goes *below* the English one rather than replacing it —
+  // whoever opens the email can use whichever language they read, and a
+  // bad machine translation never hides the original.
+  if (r.restaurant_lang && r.restaurant_lang.toLowerCase() !== "en") {
+    const keys = Object.keys(englishLabels);
+    const translated = await Promise.all(keys.map(k => translateText(englishLabels[k], r.restaurant_lang)));
+    const translatedLabels = Object.fromEntries(keys.map((k, i) => [k, translated[i]]));
+    const changed = keys.some(k => translatedLabels[k] !== englishLabels[k]);
+    if (changed) {
+      html += `<hr style="border:none;border-top:1px solid #e5ddd3;margin:8px 0 20px;">`;
+      html += buildReservationEmailBody(r, translatedLabels, confirmUrl, declineUrl, r.restaurant_lang);
+    }
+  }
+
+  await axios.post(
+    "https://api.resend.com/emails",
+    {
+      // A display name makes it read as coming from a real service rather
+      // than a bare, anonymous-looking address. Left alone if the env var
+      // already carries its own "Name <address>" form.
+      from: RESERVATION_FROM_EMAIL.includes("<") ? RESERVATION_FROM_EMAIL : `Restaurant Discovery <${RESERVATION_FROM_EMAIL}>`,
+      to: [r.restaurant_email],
+      // Lets staff just hit Reply to reach the customer with questions,
+      // instead of the request being a dead-end no-reply message.
+      reply_to: r.customer_email,
+      subject: `Reservation request: ${r.party_size} ${r.party_size === 1 ? "guest" : "guests"} on ${formatReservationDate(r.date)} at ${r.time}`,
+      html: `<div style="font-family:Helvetica,Arial,sans-serif;color:#1a1715;max-width:560px;">
+        <p style="margin:0 0 18px;padding-bottom:10px;border-bottom:2px solid #8B3A1F;font-family:Georgia,serif;font-size:18px;color:#8B3A1F;">Restaurant Discovery</p>
+        ${html}
+      </div>`,
+    },
+    { headers: { Authorization: `Bearer ${RESEND_API_KEY}` }, timeout: 10000 }
+  );
+}
+
+// Standalone HTML (inline <style>, no external assets) — restaurant staff
+// land here straight from their inbox, not signed into the app, so this
+// can't lean on index.html's JS or style.css at all.
+function renderReservationPage(title, message, tone) {
+  const accent = tone === "confirmed" ? "#2e7d32" : tone === "declined" ? "#c62828" : "#8B3A1F";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeForEmail(title)}</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #F4EFE3; font-family: Helvetica, Arial, sans-serif; color: #1A1715; padding: 16px; box-sizing: border-box; }
+  .card { background: #fff; border-radius: 18px; padding: 32px 28px; max-width: 420px; width: 100%; text-align: center; box-shadow: 0 2px 16px rgba(0,0,0,0.08); border-top: 4px solid ${accent}; }
+  h1 { font-family: Georgia, serif; font-weight: 400; font-size: 24px; margin: 0 0 12px; color: ${accent}; }
+  p { margin: 0; line-height: 1.5; color: #4a403a; }
+  .brand { margin-top: 24px; font-size: 12px; color: #8B3A1F; letter-spacing: 0.08em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>${escapeForEmail(title)}</h1>
+    <p>${escapeForEmail(message)}</p>
+    <p class="brand">Restaurant Discovery</p>
+  </div>
+</body>
+</html>`;
+}
+
+const RESERVATION_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+app.post("/reservations", reservationsLimiter, requireAuth, async (req, res) => {
+  const body = req.body || {};
+  const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const restaurant_name = str(body.restaurant_name, 200);
+  const restaurant_email = str(body.restaurant_email, 254);
+  const restaurant_lang = str(body.restaurant_lang, 10) || null;
+  const date = str(body.date, 20);
+  const time = str(body.time, 20);
+  const contact_info = str(body.contact_info, 200);
+  const notes = str(body.notes, 1000);
+  const place_id = str(body.place_id, 300) || null;
+
+  const missing = [];
+  if (!restaurant_name) missing.push("restaurant_name");
+  if (!restaurant_email) missing.push("restaurant_email");
+  if (!date) missing.push("date");
+  if (!time) missing.push("time");
+  if (body.party_size === undefined || body.party_size === null || body.party_size === "") missing.push("party_size");
+  if (missing.length > 0) {
+    return res.status(400).json({ error: `Missing required field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}` });
+  }
+  if (!RESERVATION_EMAIL_RE.test(restaurant_email)) {
+    return res.status(400).json({ error: "Restaurant email doesn't look like a valid email address" });
+  }
+  // The app's own date/time inputs always send these shapes; anything else
+  // (or an impossible date like 2026-02-30) would reach the restaurant as
+  // garbage, so it's refused here rather than passed along.
+  const parsedDate = new Date(`${date}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
+    return res.status(400).json({ error: "Date must be a real date (YYYY-MM-DD)" });
+  }
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    return res.status(400).json({ error: "Time must be in HH:MM format" });
+  }
+  const partySize = Number(body.party_size);
+  if (!Number.isInteger(partySize) || partySize < 1 || partySize > 50) {
+    return res.status(400).json({ error: "Party size must be a whole number from 1 to 50" });
+  }
+
+  const now = Date.now();
+  const reservation = {
+    id: crypto.randomUUID(),
+    place_id,
+    restaurant_name,
+    restaurant_email,
+    restaurant_lang,
+    date,
+    time,
+    party_size: partySize,
+    // From the session, never the body — the restaurant should see who
+    // actually signed in, not whatever name the client chose to send.
+    customer_name: req.user.name,
+    customer_email: req.user.email,
+    contact_info,
+    notes,
+    status: "pending",
+    // Two separate random tokens rather than the reservation's own id —
+    // the id goes back to the browser (it's how the app polls status), so
+    // it can't also be what authorizes a confirm/decline.
+    confirm_token: crypto.randomBytes(24).toString("hex"),
+    decline_token: crypto.randomBytes(24).toString("hex"),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  try {
+    await sendReservationEmail(reservation);
+  } catch (error) {
+    // Not saved — a "pending" request the restaurant never received would
+    // just sit there waiting on a click that can't happen.
+    console.error("Reservation email failed:", error.response?.data || error.message);
+    return res.status(502).json({ error: "Couldn't send the request to the restaurant, try again" });
+  }
+
+  reservations.push(reservation);
+  saveReservations(reservations);
+  // The next person reserving here gets this pre-filled instead of hunting
+  // for it again (see GET /restaurant-email).
+  if (!isCustomersOwnEmail(restaurant_email, reservation)) rememberRestaurantEmail(place_id, restaurant_email, "user");
+  res.json({ reservation: publicReservation(reservation) });
+});
+
+// The signed-in user's own requests only — matched on the session's email,
+// same ownership-from-the-session rule as DELETE /reviews.
+app.get("/reservations", reservationsLimiter, requireAuth, (req, res) => {
+  const mine = reservations
+    .filter(r => r.customer_email === req.user.email)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map(publicReservation);
+  res.json({ reservations: mine });
+});
+
+// Confirm/decline must be registered BEFORE GET /reservations/:id below —
+// Express matches in registration order, and :id would otherwise swallow
+// "confirm"/"decline" as an id, sending a restaurant's click into
+// requireAuth and a 401 instead of here. No auth on purpose: staff click
+// these from their inbox, not signed into the app; the unguessable token
+// is the authorization.
+function handleReservationResponse(tokenField, newStatus) {
+  return (req, res) => {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    const reservation = token ? reservations.find(r => r[tokenField] === token) : null;
+    if (!reservation) {
+      return res.status(404).send(renderReservationPage(
+        "Link not found",
+        "This reservation link is invalid or no longer exists.",
+        "error"
+      ));
+    }
+    // Already answered — show what it is without touching it, so a second
+    // click (or clicking the other button afterwards) can't flip it back
+    // and forth.
+    if (reservation.status !== "pending") {
+      return res.send(renderReservationPage(
+        `Already ${reservation.status}`,
+        `This reservation for ${reservation.party_size} on ${reservation.date} at ${reservation.time} was already marked as ${reservation.status}. Nothing was changed.`,
+        reservation.status
+      ));
+    }
+    reservation.status = newStatus;
+    reservation.updatedAt = Date.now();
+    saveReservations(reservations);
+    // Either click (decline included) proves someone at this address reads
+    // and answers these — the best evidence we'll ever have that it's the
+    // right one.
+    if (!isCustomersOwnEmail(reservation.restaurant_email, reservation)) {
+      rememberRestaurantEmail(reservation.place_id, reservation.restaurant_email, "confirmed");
+    }
+    res.send(renderReservationPage(
+      `Reservation ${newStatus}`,
+      `The reservation for ${reservation.customer_name || "your guest"}, party of ${reservation.party_size} on ${reservation.date} at ${reservation.time}, is now ${newStatus}. The guest will see this in the app.`,
+      newStatus
+    ));
+  };
+}
+
+app.get("/reservations/confirm", reservationsLimiter, handleReservationResponse("confirm_token", "confirmed"));
+app.get("/reservations/decline", reservationsLimiter, handleReservationResponse("decline_token", "declined"));
+
+app.get("/reservations/:id", reservationsLimiter, requireAuth, (req, res) => {
+  const reservation = reservations.find(r => r.id === req.params.id);
+  // 404 for someone else's reservation too, not 403 — no reason to confirm
+  // to a stranger that an id exists at all.
+  if (!reservation || reservation.customer_email !== req.user.email) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+  res.json({ reservation: publicReservation(reservation) });
+});
+
+// ── Restaurant email lookup ──
+// Google Places has no email field, so the Reserve modal's pre-fill comes
+// from the restaurant's own website: fetch the homepage (plus a few likely
+// contact/booking pages if that has none) and pull addresses out of the
+// raw HTML. Plain HTTP fetches only, no headless browser — that would cost
+// real CPU/memory and seconds per site for the minority of sites that only
+// render with JavaScript; those simply come back empty and the user types
+// the address instead. Only ever triggered by a signed-in user opening
+// Reserve on one specific place, never a bulk crawl.
+const EMAIL_LOOKUP_DEADLINE_MS = 5000;   // whole lookup, all pages — the modal stays usable meanwhile
+const EMAIL_LOOKUP_PAGE_TIMEOUT_MS = 3500;
+const EMAIL_LOOKUP_MISS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // re-crawl a "nothing found" site after a week
+const EMAIL_LOOKUP_MAX_EXTRA_PAGES = 4;
+
+// The website comes from Google (see fetchPlaceDetails), never from the
+// client, so this isn't open to "fetch any URL I give you" — but a listing
+// can still point anywhere, so refuse obviously-internal hosts, on the
+// first request and on every redirect hop. (Hostnames that *resolve* to a
+// private IP aren't caught; acceptable for a Google-sourced URL in a POC.)
+function isPublicHttpUrl(url) {
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return false;
+  if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) return false;
+  // IPv6 literals only (a colon never appears in a hostname) — loopback,
+  // unique-local (fc00::/7), link-local (fe80::/10).
+  if (host.includes(":") && (host === "::1" || host === "::" || /^(fc|fd|fe[89ab])/.test(host))) return false;
+  return true;
+}
+
+// A social profile as the "website" is common for small places, but those
+// pages are JS-rendered and login-walled — a fetch would never find an
+// email there, so don't bother.
+const EMAIL_LOOKUP_SKIP_HOSTS = /(^|\.)(facebook|instagram|fb|tiktok|linktr|twitter|x|google|goo|maps\.app\.goo|tripadvisor|thefork|opentable|wolt|just-eat|ubereats)\.[a-z.]+$/i;
+
+async function fetchHtml(url, signal) {
+  if (!isPublicHttpUrl(url)) return null;
+  try {
+    const res = await axios.get(url, {
+      signal,
+      timeout: EMAIL_LOOKUP_PAGE_TIMEOUT_MS,
+      maxRedirects: 3,
+      maxContentLength: 2 * 1024 * 1024,
+      responseType: "text",
+      // Some sites serve an empty shell (or a 403) to anything that doesn't
+      // look like a browser; an honest browser-ish UA gets the real page.
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; RestaurantDiscoveryBot/0.1; reservation email lookup)",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en,da;q=0.8",
+      },
+      beforeRedirect: (options) => {
+        if (!isPublicHttpUrl(`${options.protocol}//${options.hostname}${options.path || ""}`)) {
+          throw new Error("Redirect to a non-public host refused");
+        }
+      },
+    });
+    if (!/html|xml|text\/plain/i.test(res.headers["content-type"] || "")) return null;
+    return { html: String(res.data), url: res.request?.res?.responseUrl || url };
+  } catch {
+    return null;
+  }
+}
+
+// Cloudflare's "email address obfuscation" (on by default for a lot of
+// sites) swaps every address for a hex blob — trivially reversible: the
+// first byte is an XOR key for the rest.
+function decodeCloudflareEmail(hex) {
+  try {
+    const key = parseInt(hex.slice(0, 2), 16);
+    let out = "";
+    for (let i = 2; i < hex.length; i += 2) out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+const EMAIL_PATTERN = /[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,24}/gi;
+const EMAIL_JUNK_TLD = /\.(png|jpe?g|gif|svg|webp|avif|css|js|ico|woff2?)$/i;
+const EMAIL_JUNK_DOMAIN = /(^|\.)(sentry\.io|sentry-next\.wixpress\.com|wixpress\.com|wix\.com|example\.(com|org|net)|domain\.(com|dk)|email\.com|yourdomain\.[a-z]+|squarespace\.com|godaddy\.com|cloudflare\.com|schema\.org|w3\.org|mysite\.com|sitename\.com)$/i;
+const EMAIL_JUNK_LOCAL = /^(no-?reply|do-?not-?reply|donotreply|example|name|your-?name|youremail|your-?email|user|email|test|mail@mail)$/i;
+// Addresses a reservation should go to rank up; ones that clearly belong
+// to some other department (jobs, invoices, press, the web agency) rank
+// down rather than being excluded — a restaurant whose only address is
+// "job@" is still better than nothing, and the user reviews it anyway.
+const EMAIL_GOOD_LOCAL = /^(booking|bookings|book|bord|bordbestilling|reservation|reservations|reservationer|reserve|table|tables|info|kontakt|contact|mail|hello|hej|hi|restaurant|restaurant-?\w*|dinner|events?)$/i;
+const EMAIL_BAD_LOCAL = /^(jobs?|career|careers|karriere|press|presse|pr|privacy|gdpr|dpo|webmaster|admin|faktura|invoice|invoices|regnskab|accounting|bogholderi|marketing|salg|sales|support|abuse|hostmaster|postmaster)$/i;
+
+// Crude "same organisation" check — last two labels of the host (so
+// "www.noma.dk" and "booking@noma.dk" match). Wrong for co.uk-style
+// suffixes, which only costs the domain bonus, not correctness.
+function baseDomain(host) {
+  return (host || "").toLowerCase().split(".").slice(-2).join(".");
+}
+
+// Returns Map<email, score> for one page. Weights: a mailto: link or a
+// decoded Cloudflare address is almost certainly deliberate contact info
+// (3), a spelled-out "info [at] x [dot] dk" is too (2), a bare address in
+// the text is usually fine but occasionally a stray (1).
+function extractEmailCandidates(html) {
+  const found = new Map();
+  const add = (raw, weight) => {
+    if (!raw) return;
+    const email = raw.trim().replace(/^mailto:/i, "").replace(/[.,;:]+$/, "").toLowerCase();
+    if (!/^[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,24}$/.test(email)) return;
+    const [local, domain] = email.split("@");
+    if (EMAIL_JUNK_TLD.test(email) || EMAIL_JUNK_DOMAIN.test(domain) || EMAIL_JUNK_LOCAL.test(local)) return;
+    // Hex/hash-looking local parts are tracking IDs (Sentry DSNs etc.), not mailboxes.
+    if (/^[a-f0-9]{16,}$/.test(local)) return;
+    found.set(email, (found.get(email) || 0) + weight);
+  };
+
+  // Numeric entities (&#64; for @ is a common light obfuscation) — decoded
+  // once up front so every pattern below sees plain characters.
+  const text = html
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&commat;/gi, "@")
+    .replace(/&period;/gi, ".");
+
+  for (const m of text.matchAll(/data-cfemail=["']([0-9a-f]+)["']/gi)) add(decodeCloudflareEmail(m[1]), 3);
+  for (const m of text.matchAll(/\/cdn-cgi\/l\/email-protection#([0-9a-f]+)/gi)) add(decodeCloudflareEmail(m[1]), 3);
+  for (const m of text.matchAll(/mailto:([^"'?>\s]+)/gi)) {
+    let v = m[1];
+    try { v = decodeURIComponent(v); } catch { /* keep raw */ }
+    add(v, 3);
+  }
+
+  // "info [at] noma [dot] dk" / "info(at)noma.dk" / Danish "snabel-a".
+  const deobfuscated = text
+    .replace(/\s*[\[({]\s*(?:at|snabel-a)\s*[\])}]\s*/gi, "@")
+    .replace(/\s*[\[({]\s*(?:dot|punktum)\s*[\])}]\s*/gi, ".");
+  if (deobfuscated !== text) {
+    const plainAts = new Set((text.match(EMAIL_PATTERN) || []).map(e => e.toLowerCase()));
+    for (const e of deobfuscated.match(EMAIL_PATTERN) || []) {
+      if (!plainAts.has(e.toLowerCase())) add(e, 2);
+    }
+  }
+  for (const e of text.match(EMAIL_PATTERN) || []) add(e, 1);
+  return found;
+}
+
+function pickBestEmail(candidates, siteHost) {
+  const site = baseDomain(siteHost);
+  let best = null;
+  for (const [email, weight] of candidates) {
+    const [local, domain] = email.split("@");
+    let score = Math.min(weight, 6); // repeated mentions help, but not unboundedly
+    if (site && baseDomain(domain) === site) score += 4;
+    if (EMAIL_GOOD_LOCAL.test(local)) score += 2;
+    if (EMAIL_BAD_LOCAL.test(local)) score -= 3;
+    if (!best || score > best.score) best = { email, score };
+  }
+  return best;
+}
+
+// Same-site links that look like they lead to contact details, in the
+// site's own language(s) — plus a few conventional paths as a fallback
+// for sites whose nav is JS-built and so has no <a href> in the raw HTML.
+const CONTACT_LINK_HINT = /(contact|kontakt|booking|book|reserv|bestil|bord|about|om-os|om_os|omos|find[- ]?(?:us|os)|visit|besoeg|besøg|info)/i;
+const CONTACT_FALLBACK_PATHS = ["/kontakt", "/contact", "/booking", "/contact-us", "/om-os"];
+
+function findContactPageUrls(html, pageUrl) {
+  const base = new URL(pageUrl);
+  const urls = new Set();
+  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const [, href, label] = m;
+    if (!CONTACT_LINK_HINT.test(href) && !CONTACT_LINK_HINT.test(label.replace(/<[^>]+>/g, ""))) continue;
+    try {
+      const u = new URL(href, base);
+      if (u.hostname !== base.hostname || !/^https?:$/.test(u.protocol)) continue;
+      u.hash = "";
+      if (u.href !== base.href) urls.add(u.href);
+    } catch { /* malformed href */ }
+  }
+  for (const p of CONTACT_FALLBACK_PATHS) urls.add(new URL(p, base).href);
+  return [...urls].slice(0, EMAIL_LOOKUP_MAX_EXTRA_PAGES);
+}
+
+async function findEmailOnWebsite(website) {
+  if (!isPublicHttpUrl(website)) return null;
+  if (EMAIL_LOOKUP_SKIP_HOSTS.test(new URL(website).hostname)) return null;
+  // One shared abort for every request in this lookup — whatever hasn't
+  // answered by the deadline is simply dropped rather than holding the
+  // modal's pre-fill hostage.
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), EMAIL_LOOKUP_DEADLINE_MS);
+  try {
+    const home = await fetchHtml(website, controller.signal);
+    if (!home) return null;
+    const siteHost = new URL(home.url).hostname;
+    const homeBest = pickBestEmail(extractEmailCandidates(home.html), siteHost);
+    // An on-domain address straight off the homepage is as good as it
+    // gets — no need to spend another second on subpages.
+    if (homeBest && homeBest.score >= 5) return { email: homeBest.email, found_on: home.url };
+
+    const pages = await Promise.all(
+      findContactPageUrls(home.html, home.url).map(u => fetchHtml(u, controller.signal))
+    );
+    const all = extractEmailCandidates(home.html);
+    const foundOn = new Map([...all.keys()].map(e => [e, home.url]));
+    for (const page of pages.filter(Boolean)) {
+      for (const [email, weight] of extractEmailCandidates(page.html)) {
+        all.set(email, (all.get(email) || 0) + weight);
+        if (!foundOn.has(email)) foundOn.set(email, page.url);
+      }
+    }
+    const best = pickBestEmail(all, siteHost);
+    return best ? { email: best.email, found_on: foundOn.get(best.email) } : null;
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
+// Two people opening Reserve on the same place at once share one crawl.
+const emailLookupsInFlight = new Map(); // place_id -> Promise
+
+// Pre-fill for the Reserve modal. Order: anything already known for this
+// place (typed by an earlier user, or proven by a restaurant's click) →
+// a recent "nothing found" → a live website lookup. Never an error for
+// "couldn't find one": { email: null } just leaves the field for the user.
+app.get("/restaurant-email", placesLimiter, requireAuth, async (req, res) => {
+  const placeId = typeof req.query.place_id === "string" ? req.query.place_id : "";
+  if (!placeId) return res.status(400).json({ error: "place_id is required" });
+
+  const known = restaurantEmails[placeId];
+  if (known?.email) return res.json({ email: known.email, source: known.source });
+  if (known && Date.now() - known.updatedAt < EMAIL_LOOKUP_MISS_TTL_MS) {
+    return res.json({ email: null, source: null });
+  }
+
+  if (!emailLookupsInFlight.has(placeId)) {
+    const lookup = (async () => {
+      const { website } = await fetchPlaceDetails(placeId);
+      if (!website) return null;
+      const found = await findEmailOnWebsite(website);
+      console.log(`Restaurant email lookup for ${placeId} (${website}): ${found ? `${found.email} on ${found.found_on}` : "nothing found"}`);
+      if (found) {
+        rememberRestaurantEmail(placeId, found.email, "website");
+      } else {
+        restaurantEmails[placeId] = { email: null, source: "website", updatedAt: Date.now() };
+        saveRestaurantEmails(restaurantEmails);
+      }
+      return found;
+    })().finally(() => emailLookupsInFlight.delete(placeId));
+    emailLookupsInFlight.set(placeId, lookup);
+  }
+
+  try {
+    const found = await emailLookupsInFlight.get(placeId);
+    res.json(found ? { email: found.email, source: "website", found_on: found.found_on } : { email: null, source: null });
+  } catch (error) {
+    console.error(`Restaurant email lookup failed for ${placeId}:`, error.message);
+    res.json({ email: null, source: null });
+  }
 });
 
 // Client IDs aren't secret (they're meant to end up in frontend JS,

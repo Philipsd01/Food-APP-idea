@@ -14,6 +14,176 @@
   <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
   <link rel="stylesheet" href="style.css">
+  <!-- Reservation modal + status badge (see openReservationModal) — scoped
+       here rather than in style.css so this feature is self-contained.
+       Reuses style.css's own tokens (--paper-2, --ink, --ember...), which
+       body.dark already redefines, so only the badge's fixed status colors
+       need explicit dark variants. -->
+  <style>
+    .reservation-form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    /* Date needs the most room (a locale's dd/mm/yyyy plus the picker icon
+       got clipped at equal thirds), guests the least (1-2 digits). */
+    .reservation-form-row {
+      display: grid;
+      grid-template-columns: 1.6fr 1.1fr 0.7fr;
+      gap: 8px;
+    }
+
+    .reservation-form-row > label {
+      min-width: 0;
+    }
+
+    .reservation-form-row .reservation-field {
+      padding: 9px 8px;
+      min-width: 0;
+    }
+
+    /* The shared .saved-edit-save "filled" look loses to
+       .save-picker-new-btn's dashed/transparent one (it comes later in
+       style.css at equal specificity), so the primary action read as a
+       disabled ghost button. The id bumps specificity past both. */
+    #reservationSubmitBtn {
+      background: var(--ink);
+      border: 0.5px solid var(--ink);
+      color: var(--paper);
+      font-weight: 500;
+    }
+
+    #reservationSubmitBtn:hover {
+      background: var(--ember);
+      border-color: var(--ember);
+      color: #fff;
+    }
+
+    #reservationSubmitBtn:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .reservation-field-label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-family: var(--sans);
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+
+    .reservation-field {
+      width: 100%;
+      background: var(--paper-2);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--ink);
+      resize: none;
+    }
+
+    .reservation-field:focus {
+      outline: none;
+      border-color: var(--ember-light);
+    }
+
+    body.dark .reservation-field {
+      color-scheme: dark;
+    }
+
+    .reservation-email-hint {
+      font-size: 11px;
+      color: var(--ink-3);
+      min-height: 14px;
+    }
+
+    .reservation-email-hint.searching::after {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      margin-left: 6px;
+      border: 1.5px solid var(--ink-3);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: reservation-hint-spin 0.8s linear infinite;
+      vertical-align: -1px;
+    }
+
+    @keyframes reservation-hint-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .reservation-modal-status {
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--ink-3);
+      min-height: 16px;
+      margin: 0 0 10px;
+    }
+
+    .reservation-modal-status.error {
+      color: #c62828;
+    }
+
+    body.dark .reservation-modal-status.error {
+      color: #ef7a7a;
+    }
+
+    .reservation-status-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--sans);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 0.5px solid;
+      margin: 0 0 8px;
+    }
+
+    .reservation-status-line.pending {
+      color: #8a5a00;
+      border-color: #d9a441;
+      background: #fbf1dc;
+    }
+
+    .reservation-status-line.confirmed {
+      color: #2D6A27;
+      border-color: #2D6A27;
+      background: #e6f2e4;
+    }
+
+    .reservation-status-line.declined {
+      color: #b3261e;
+      border-color: #d9867f;
+      background: #fbe6e4;
+    }
+
+    body.dark .reservation-status-line.pending {
+      color: #E8C06A;
+      border-color: #8a6a2a;
+      background: rgba(232, 192, 106, 0.1);
+    }
+
+    body.dark .reservation-status-line.confirmed {
+      color: #5A9E54;
+      border-color: #3f6e3b;
+      background: rgba(90, 158, 84, 0.1);
+    }
+
+    body.dark .reservation-status-line.declined {
+      color: #ef7a7a;
+      border-color: #8a3a35;
+      background: rgba(239, 122, 122, 0.1);
+    }
+  </style>
   <!-- ?hl=en pins the rendered button's own text (e.g. "Sign in with
        Google") to English regardless of the visitor's browser/OS language —
        without it, Google picks the locale itself and it comes out
@@ -288,6 +458,44 @@
       </div>
       <button class="save-picker-new-btn saved-edit-save" onclick="submitReview()">Post review</button>
       <button class="save-picker-new-btn review-editor-delete" id="reviewEditorDeleteBtn" onclick="deleteMyReview()" hidden>Delete my review</button>
+    </div>
+  </div>
+
+  <!-- Reservation request (see openReservationModal): same bottom-sheet
+       card as the review editor above. Nothing is booked directly; the
+       server emails the restaurant, and their confirm/decline click sets
+       the status shown on the card afterwards. -->
+  <div class="save-picker-overlay" id="reservationOverlay" onclick="if (event.target === this) closeReservationModal()">
+    <div class="save-picker-card">
+      <button class="save-picker-close-btn" onclick="closeReservationModal()" title="Close" aria-label="Close">
+        <i class="ti ti-x"></i>
+      </button>
+      <p class="save-picker-title" id="reservationTitle">Request a table</p>
+      <div class="reservation-form">
+        <label class="reservation-field-label">Restaurant email
+          <input type="email" class="reservation-field" id="reservationRestaurantEmail" placeholder="bookings@restaurant.com" autocomplete="off">
+          <span class="reservation-email-hint" id="reservationEmailHint"></span>
+        </label>
+        <div class="reservation-form-row">
+          <label class="reservation-field-label">Date
+            <input type="date" class="reservation-field" id="reservationDate">
+          </label>
+          <label class="reservation-field-label">Time
+            <input type="time" class="reservation-field" id="reservationTime">
+          </label>
+          <label class="reservation-field-label">Guests
+            <input type="number" class="reservation-field" id="reservationPartySize" min="1" max="50" value="2">
+          </label>
+        </div>
+        <label class="reservation-field-label">How can they reach you?
+          <input type="text" class="reservation-field" id="reservationContact" placeholder="Phone or email">
+        </label>
+        <label class="reservation-field-label">Notes (optional)
+          <textarea class="reservation-field" id="reservationNotes" rows="2" maxlength="1000" placeholder="Allergies, a window table, a birthday…"></textarea>
+        </label>
+      </div>
+      <p class="reservation-modal-status" id="reservationModalStatus"></p>
+      <button class="save-picker-new-btn saved-edit-save" id="reservationSubmitBtn" onclick="submitReservationRequest()">Send request</button>
     </div>
   </div>
 
@@ -955,6 +1163,7 @@
       loadExtraPhotos(index);
       loadCommunityReviews(index);
       attachAskVoiceInput(index);
+      refreshReservationStatus(index);
       // Full, not peek — tapping "View details" is a deliberate request to
       // actually see the restaurant, not a glance, so it should open at the
       // size that's actually the point of opening it at all. Dragging or
@@ -1267,6 +1476,11 @@
       if (r.latitude && r.longitude) {
         actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); showRouteOnMap(${index}, 'driving')"><i class="ti ti-directions"></i> Directions</button>`;
       }
+      // Gated on place_id: it's the key the stored reservation record (and
+      // so the status badge/polling) hangs off, same as askBoxHtml below.
+      if (r.place_id) {
+        actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); openReservationModal(${index})"><i class="ti ti-calendar-event"></i> Reserve</button>`;
+      }
       if (r.phone) {
         actionsHtml += `<a class="card-map-btn" href="tel:${escapeHtml(r.phone)}" onclick="event.stopPropagation()"><i class="ti ti-phone"></i> Call</a>`;
       }
@@ -1333,7 +1547,7 @@
             : "");
 
       return `
-        <div class="card" style="animation-delay: ${index * 0.08}s;" onclick="toggleCardExpand(this, ${index})">
+        <div class="card" data-card-index="${index}" style="animation-delay: ${index * 0.08}s;" onclick="toggleCardExpand(this, ${index})">
           ${photoHtml}
           <div class="card-header">
             <span class="card-name">${safeName}</span>
@@ -1344,6 +1558,7 @@
               ${hasScore ? `<span class="card-score ${scoreClass}" ${scoreHint(r.score) ? `title="${escapeHtml(scoreHint(r.score))}"` : ''}>${label}</span>` : ''}
             </div>
           </div>
+          ${reservationBadgeHtml(r)}
           <div class="card-tags">${cardTagsHtml}</div>
             ${hasScore && r.score < 80 ? `<p class="card-score-hint">${escapeHtml(scoreHint(r.score))}</p>` : ''}
           ${summaryHtml}
@@ -1399,6 +1614,7 @@
         loadExtraPhotos(index);
         loadCommunityReviews(index);
         attachAskVoiceInput(index);
+        refreshReservationStatus(index);
         // Expanding reveals photos/reviews/ask-box below the card, which can
         // land off-screen with no hint there's more — 'nearest' only moves
         // the page if the card isn't already fully visible, so a tap near
@@ -1541,6 +1757,252 @@
     function closeReviewEditor() {
       document.getElementById('reviewEditorOverlay').classList.remove('open');
       reviewEditorIndex = null;
+    }
+
+    // --- Reservations (see /reservations on the server). The real request
+    // lives server-side; this localStorage map is just a pointer per
+    // place_id ({ id, status, restaurant_email, date, time }) so a card
+    // knows it has a request to show and poll, without a round trip for
+    // every card that's ever rendered.
+    const RESERVATION_RECORDS_KEY = "reservationRecords";
+
+    function loadReservationRecords() {
+      try {
+        return JSON.parse(localStorage.getItem(RESERVATION_RECORDS_KEY) || "{}") || {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function saveReservationRecord(placeId, record) {
+      const records = loadReservationRecords();
+      records[placeId] = record;
+      localStorage.setItem(RESERVATION_RECORDS_KEY, JSON.stringify(records));
+    }
+
+    const RESERVATION_STATUS_LABELS = {
+      pending: { icon: "ti-clock", text: "Reservation requested, waiting on the restaurant" },
+      confirmed: { icon: "ti-circle-check", text: "Reservation confirmed" },
+      declined: { icon: "ti-circle-x", text: "Reservation declined" },
+    };
+
+    function reservationBadgeHtml(r) {
+      const record = r && r.place_id ? loadReservationRecords()[r.place_id] : null;
+      const info = record && RESERVATION_STATUS_LABELS[record.status];
+      if (!info) return "";
+      const when = record.date ? ` · ${record.date}${record.time ? ` ${record.time}` : ""}` : "";
+      return `<div class="reservation-status-line ${record.status}"><i class="ti ${info.icon}"></i> ${escapeHtml(info.text + when)}</div>`;
+    }
+
+    // Only the containers actually showing this index right now — the
+    // results list keeps its old cards around (hidden) after a saved/
+    // showcase deep dive swaps currentResults for a single restaurant, so
+    // "card 0 in #results" isn't necessarily the same place as "card 0 in
+    // the sheet".
+    function visibleCardsFor(index) {
+      const cards = [];
+      if (singleCardIndex === index && bottomSheetState !== 'closed') {
+        const c = document.querySelector(`#sheetContent .card[data-card-index="${index}"]`);
+        if (c) cards.push(c);
+      }
+      if (!document.getElementById('resultsSheet').hidden && !browseMode) {
+        const c = document.querySelector(`#results .card[data-card-index="${index}"]`);
+        if (c) cards.push(c);
+      }
+      return cards;
+    }
+
+    // Swaps the badge in place (or inserts one right under the header) —
+    // re-rendering the whole card would collapse it and drop the gallery/
+    // reviews that were lazily loaded into it.
+    function updateReservationBadge(index) {
+      const r = currentResults[index];
+      if (!r) return;
+      const html = reservationBadgeHtml(r);
+      visibleCardsFor(index).forEach(card => {
+        const existing = card.querySelector('.reservation-status-line');
+        if (existing) existing.remove();
+        if (html) card.querySelector('.card-header')?.insertAdjacentHTML('afterend', html);
+      });
+    }
+
+    let reservationModalIndex = null;
+
+    function openReservationModal(index) {
+      if (!currentUser) {
+        showToast("Sign in to request a reservation");
+        return;
+      }
+      const r = currentResults[index];
+      if (!r || !r.place_id) return;
+      reservationModalIndex = index;
+      const existing = loadReservationRecords()[r.place_id];
+      document.getElementById('reservationTitle').textContent = `Request a table at ${r.name}`;
+      document.getElementById('reservationRestaurantEmail').value = existing?.restaurant_email || '';
+      reservationPrefilledEmail = existing?.restaurant_email || null;
+      if (existing?.restaurant_email) setReservationEmailHint('The address you used last time');
+      else prefillRestaurantEmail(index);
+      const dateEl = document.getElementById('reservationDate');
+      // Local date, not toISOString() (UTC) — late evening in Copenhagen
+      // would otherwise already be "tomorrow" and block booking tonight.
+      const now = new Date();
+      dateEl.min = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      if (!dateEl.value || dateEl.value < dateEl.min) dateEl.value = dateEl.min;
+      // A typical dinner time instead of an empty --:-- — one less field
+      // to fill for the common case, still just a tap to change.
+      const timeEl = document.getElementById('reservationTime');
+      if (!timeEl.value) timeEl.value = '19:00';
+      document.getElementById('reservationContact').value = currentUser.email || '';
+      document.getElementById('reservationNotes').value = '';
+      setReservationModalStatus('');
+      document.getElementById('reservationSubmitBtn').disabled = false;
+      document.getElementById('reservationOverlay').classList.add('open');
+    }
+
+    function setReservationEmailHint(text, searching = false) {
+      const el = document.getElementById('reservationEmailHint');
+      el.textContent = text;
+      el.classList.toggle('searching', searching);
+    }
+
+    // Google Places has no email field — the server finds one (see GET
+    // /restaurant-email): an address an earlier guest used, one the
+    // restaurant has actually answered at, or one read off the
+    // restaurant's own website. That last one can take a few seconds on
+    // first lookup, so it runs while the person is still picking a date
+    // and time, and only fills the field if they haven't started typing
+    // their own address in the meantime. Remembered per place for the
+    // session so reopening the modal doesn't ask again.
+    const restaurantEmailLookups = new Map(); // place_id -> Promise<{ email, source, found_on }>
+    let reservationEmailLookupSeq = 0;
+    // Whatever the field was pre-filled with — the "Found on ..." hint only
+    // describes that address, so it goes away once the field says
+    // something else (see the input listener below).
+    let reservationPrefilledEmail = null;
+    document.getElementById('reservationRestaurantEmail').addEventListener('input', (e) => {
+      if (reservationPrefilledEmail && e.target.value.trim().toLowerCase() !== reservationPrefilledEmail.toLowerCase()) {
+        setReservationEmailHint('');
+      }
+    });
+
+    async function prefillRestaurantEmail(index) {
+      const r = currentResults[index];
+      if (!r?.place_id) return;
+      const seq = ++reservationEmailLookupSeq;
+      const inputEl = document.getElementById('reservationRestaurantEmail');
+      setReservationEmailHint("Looking for the restaurant's email", true);
+      if (!restaurantEmailLookups.has(r.place_id)) {
+        restaurantEmailLookups.set(r.place_id, fetch(`/restaurant-email?place_id=${encodeURIComponent(r.place_id)}`)
+          .then(res => res.ok ? res.json() : { email: null })
+          .catch(() => ({ email: null })));
+      }
+      const result = await restaurantEmailLookups.get(r.place_id);
+      if (!result?.email) restaurantEmailLookups.delete(r.place_id); // a miss is worth retrying next time (server caches its own misses anyway)
+      // Modal closed, or reopened for another restaurant, while this was
+      // in flight — this answer no longer belongs to what's on screen.
+      if (seq !== reservationEmailLookupSeq || reservationModalIndex !== index) return;
+      if (!result?.email) {
+        setReservationEmailHint(inputEl.value ? '' : "Couldn't find one. Check their website, or call them instead.");
+        return;
+      }
+      if (inputEl.value.trim() && inputEl.value.trim().toLowerCase() !== result.email) {
+        setReservationEmailHint(''); // they typed their own; don't second-guess it
+        return;
+      }
+      inputEl.value = result.email;
+      reservationPrefilledEmail = result.email;
+      let host = '';
+      try { host = new URL(result.found_on).hostname.replace(/^www\./, ''); } catch (e) { /* no page recorded */ }
+      setReservationEmailHint(
+        result.source === 'confirmed' ? 'The restaurant has answered requests at this address'
+        : result.source === 'user' ? 'Used by an earlier guest, please double-check'
+        : `Found on ${host || 'their website'}, please double-check`
+      );
+    }
+
+    function closeReservationModal() {
+      reservationEmailLookupSeq++; // drop any lookup still in flight for this modal
+      setReservationEmailHint('');
+      document.getElementById('reservationOverlay').classList.remove('open');
+      reservationModalIndex = null;
+    }
+
+    function setReservationModalStatus(text, isError = false) {
+      const el = document.getElementById('reservationModalStatus');
+      el.textContent = text;
+      el.classList.toggle('error', isError);
+    }
+
+    async function submitReservationRequest() {
+      if (reservationModalIndex === null) return;
+      const index = reservationModalIndex;
+      const r = currentResults[index];
+      if (!r || !r.place_id) return;
+      const payload = {
+        place_id: r.place_id,
+        restaurant_name: r.name,
+        restaurant_email: document.getElementById('reservationRestaurantEmail').value.trim(),
+        date: document.getElementById('reservationDate').value,
+        time: document.getElementById('reservationTime').value,
+        party_size: parseInt(document.getElementById('reservationPartySize').value, 10),
+        contact_info: document.getElementById('reservationContact').value.trim(),
+        notes: document.getElementById('reservationNotes').value.trim(),
+      };
+      const submitBtn = document.getElementById('reservationSubmitBtn');
+      submitBtn.disabled = true; // a double tap would email the restaurant twice
+      setReservationModalStatus('Sending…');
+      try {
+        const res = await fetch('/reservations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.reservation) {
+          // Server's own message (e.g. "Party size must be…") is specific
+          // enough to act on, same reasoning as submitReview.
+          setReservationModalStatus(data?.error || "Couldn't send the request, try again", true);
+          return;
+        }
+        const rv = data.reservation;
+        saveReservationRecord(r.place_id, {
+          id: rv.id, status: rv.status, restaurant_email: rv.restaurant_email, date: rv.date, time: rv.time,
+        });
+        closeReservationModal();
+        showToast("Reservation request sent");
+        updateReservationBadge(index);
+      } catch (e) {
+        setReservationModalStatus("Couldn't send the request, try again", true);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
+
+    // Only worth a request while pending — confirmed/declined are final on
+    // the server (see handleReservationResponse), so those never change
+    // again. Tracked per place_id so expanding the same card twice while a
+    // check is still in flight doesn't fire a duplicate.
+    const reservationRefreshInFlight = new Set();
+    async function refreshReservationStatus(index) {
+      const r = currentResults[index];
+      if (!r || !r.place_id || !currentUser) return;
+      const record = loadReservationRecords()[r.place_id];
+      if (!record || record.status !== 'pending' || reservationRefreshInFlight.has(r.place_id)) return;
+      reservationRefreshInFlight.add(r.place_id);
+      try {
+        const res = await fetch(`/reservations/${encodeURIComponent(record.id)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const status = data.reservation?.status;
+        if (status && status !== record.status) {
+          saveReservationRecord(r.place_id, { ...record, status });
+          updateReservationBadge(index);
+        }
+      } catch (e) {
+        // Leave the badge as-is; the next expand tries again.
+      } finally {
+        reservationRefreshInFlight.delete(r.place_id);
+      }
     }
 
     function openAboutOverlay() {
