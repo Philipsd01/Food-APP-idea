@@ -50,6 +50,10 @@ function rateLimiter({ windowMs, max }) {
 const aiLimiter = rateLimiter({ windowMs: 60 * 1000, max: 20 });     // /search, /ask-restaurant, /describe-restaurant — Claude + Places calls
 const placesLimiter = rateLimiter({ windowMs: 60 * 1000, max: 40 }); // /geocode, /showcase, /nearby, /place-details, /photo — Places/Geocoding only, cheaper
 const authLimiter = rateLimiter({ windowMs: 60 * 1000, max: 10 });   // /auth/google — login attempts
+// Its own bucket, not placesLimiter: a results list checks every card at
+// once (see renderResults), and that burst mustn't eat into the budget
+// the same list's photos load from. Cheap per call — cached per place.
+const bookingOptionsLimiter = rateLimiter({ windowMs: 60 * 1000, max: 60 }); // /booking-options
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -162,9 +166,9 @@ const reservationsLimiter = rateLimiter({ windowMs: 60 * 1000, max: 10 });
 // modal gets pre-filled — from an address someone already used here
 // ("user"), one a restaurant actually answered a request at ("confirmed",
 // the strongest signal it's right), or one found on the restaurant's own
-// website ("website", see findEmailOnWebsite). email: null records a
-// website lookup that found nothing, so the same dead end isn't re-crawled
-// on every tap (see EMAIL_LOOKUP_MISS_TTL_MS).
+// website ("website", see scanRestaurantWebsite). Misses aren't stored
+// here — the scan itself is cached per place (see getWebsiteScan), so the
+// same dead end isn't re-crawled on every tap either way.
 const RESTAURANT_EMAILS_FILE = path.join(__dirname, "data", "restaurant-emails.json");
 
 function loadRestaurantEmails() {
@@ -181,6 +185,29 @@ function saveRestaurantEmails(data) {
 }
 
 let restaurantEmails = loadRestaurantEmails();
+
+// How each restaurant takes bookings, keyed by place_id:
+//   website_scan: what its own site showed last time we looked — a link to
+//     an online booking system, "walk-ins only" wording (see
+//     scanRestaurantWebsite), re-checked after WEBSITE_SCAN_TTL_MS
+//   declared_no_reservations: the restaurant itself said so, via the
+//     checkbox on its decline page — outranks every other signal
+const BOOKING_INFO_FILE = path.join(__dirname, "data", "booking-info.json");
+
+function loadBookingInfo() {
+  try {
+    return JSON.parse(fs.readFileSync(BOOKING_INFO_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveBookingInfo(data) {
+  fs.mkdirSync(path.dirname(BOOKING_INFO_FILE), { recursive: true });
+  fs.writeFileSync(BOOKING_INFO_FILE, JSON.stringify(data, null, 2));
+}
+
+let bookingInfo = loadBookingInfo();
 
 // Higher wins, and nothing overwrites an address a restaurant has actually
 // responded at. A typed address ranks *below* the website's own: it's
@@ -545,7 +572,7 @@ function formatHoursStatus(periods) {
 }
 
 async function fetchPlaceDetails(placeId) {
-  const empty = { reviews: [], phone: null, website: null, hours_status: null, photos: [] };
+  const empty = { reviews: [], phone: null, website: null, hours_status: null, photos: [], periods: null, utc_offset: null, reservable: null, types: [] };
   if (!placeId) return empty;
 
   const cached = placeDetailsCache.get(placeId);
@@ -560,7 +587,10 @@ async function fetchPlaceDetails(placeId) {
       // Text Search only ever returns one representative photo per place —
       // Place Details' own "photo" field returns up to 10, so the gallery
       // pulls from here instead of the thin Text Search list.
-      { params: { place_id: placeId, fields: "review,formatted_phone_number,website,opening_hours,photo", key: GOOGLE_API_KEY } }
+      // utc_offset (minutes, DST-aware at request time) is what lets the
+      // reservation flow reason in the restaurant's own local time rather
+      // than the server's or the guest's (see restaurantNow).
+      { params: { place_id: placeId, fields: "review,formatted_phone_number,website,opening_hours,photo,utc_offset,reservable,types", key: GOOGLE_API_KEY } }
     );
     if (response.data.status !== "OK") return empty;
     const result = response.data.result || {};
@@ -570,6 +600,14 @@ async function fetchPlaceDetails(placeId) {
       website: result.website || null,
       hours_status: formatHoursStatus(result.opening_hours?.periods),
       photos: (result.photos || []).slice(0, 5).map(p => p.photo_reference).filter(Boolean),
+      // Raw weekly schedule for the reservation time picker (see
+      // bookableSlotsOn) — hours_status above is just today's summary.
+      periods: result.opening_hours?.periods || null,
+      utc_offset: typeof result.utc_offset === "number" ? result.utc_offset : null,
+      // true / false / null (Google doesn't know — common for cafés). Same
+      // billing tier as "review" above, so asking costs nothing extra.
+      reservable: typeof result.reservable === "boolean" ? result.reservable : null,
+      types: result.types || [],
     };
     placeDetailsCache.set(placeId, { data, expiresAt: Date.now() + PLACE_DETAILS_CACHE_TTL_MS });
     return data;
@@ -1308,13 +1346,26 @@ app.get("/photo", placesLimiter, async (req, res) => {
 app.get("/reviews", placesLimiter, (req, res) => {
   const placeId = req.query.place_id;
   if (!placeId) return res.status(400).json({ error: "place_id is required" });
+  // Optional session: signed-in viewers also learn which reviews they've
+  // marked helpful, so the button can render pressed.
+  const viewer = readSession(req);
   const forPlace = reviews
     .filter(r => r.place_id === placeId)
-    .sort((a, b) => b.createdAt - a.createdAt);
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map(({ helpful, ...r }) => ({
+      ...r,
+      photos: normalizeReviewPhotos(r.photos),
+      // Only the count leaves the server — who voted stays private.
+      helpfulCount: (helpful || []).length,
+      votedHelpful: !!viewer && (helpful || []).includes(viewer.sub),
+    }));
   const average = forPlace.length > 0
     ? forPlace.reduce((sum, r) => sum + r.rating, 0) / forPlace.length
     : null;
-  res.json({ reviews: forPlace, average, count: forPlace.length });
+  // Every guest photo for the place in one list, newest review first —
+  // what the restaurant's photo stack merges in next to Google's.
+  const photos = forPlace.flatMap(r => r.photos.map(p => ({ ...p, reviewId: r.id, userName: r.userName })));
+  res.json({ reviews: forPlace, average, count: forPlace.length, photos });
 });
 
 // Attached review photos — real uploaded files, not Google's. Stored on
@@ -1324,6 +1375,31 @@ app.get("/reviews", placesLimiter, (req, res) => {
 // about what someone uploads can pick its own path on disk.
 const REVIEW_PHOTOS_DIR = path.join(__dirname, "data", "review-photos");
 const REVIEW_PHOTO_MIME_EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+// Mirrored in index.html (MAX_REVIEW_PHOTOS / MAX_REVIEW_PHOTO_BYTES) so the
+// picker says no before the upload instead of after it.
+const MAX_REVIEW_PHOTOS = 3;
+const MAX_REVIEW_PHOTO_BYTES = 5 * 1024 * 1024;
+// One review per user per place already caps how many reviews someone can
+// leave, but editing is unlimited and every edit with photos runs one AI
+// check per photo — this bounds that cost per person, whatever they edit.
+const REVIEW_PHOTO_DAILY_LIMIT = 15;
+const REVIEW_PHOTO_DAY_MS = 24 * 60 * 60 * 1000;
+const reviewPhotoUploadsByUser = new Map(); // userId -> [timestamps]
+
+function reviewPhotoQuotaLeft(userId) {
+  const cutoff = Date.now() - REVIEW_PHOTO_DAY_MS;
+  const recent = (reviewPhotoUploadsByUser.get(userId) || []).filter(t => t > cutoff);
+  if (recent.length > 0) reviewPhotoUploadsByUser.set(userId, recent);
+  else reviewPhotoUploadsByUser.delete(userId);
+  return REVIEW_PHOTO_DAILY_LIMIT - recent.length;
+}
+
+function recordReviewPhotoUploads(userId, count) {
+  const list = reviewPhotoUploadsByUser.get(userId) || [];
+  for (let i = 0; i < count; i++) list.push(Date.now());
+  reviewPhotoUploadsByUser.set(userId, list);
+}
+
 const reviewPhotoUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -1332,17 +1408,152 @@ const reviewPhotoUpload = multer({
     },
     filename: (req, file, cb) => cb(null, `${crypto.randomUUID()}.${REVIEW_PHOTO_MIME_EXT[file.mimetype]}`),
   }),
-  limits: { fileSize: 5 * 1024 * 1024, files: 3 },
+  limits: { fileSize: MAX_REVIEW_PHOTO_BYTES, files: MAX_REVIEW_PHOTOS },
   fileFilter: (req, file, cb) => cb(null, !!REVIEW_PHOTO_MIME_EXT[file.mimetype]),
 });
 app.use("/review-photos", express.static(REVIEW_PHOTOS_DIR, { maxAge: "7d" }));
 
+// multer reports "too many / too big" as a thrown error, which Express would
+// turn into a generic HTML 500 — answer with a readable JSON 400 instead.
+// multer has already removed any files it wrote for the failed request.
+const MULTER_LIMIT_MESSAGES = {
+  LIMIT_FILE_SIZE: `Each photo can be at most ${MAX_REVIEW_PHOTO_BYTES / (1024 * 1024)} MB.`,
+  LIMIT_FILE_COUNT: `Up to ${MAX_REVIEW_PHOTOS} photos per review.`,
+  LIMIT_UNEXPECTED_FILE: `Up to ${MAX_REVIEW_PHOTOS} photos per review.`,
+};
+function acceptReviewPhotos(req, res, next) {
+  reviewPhotoUpload.array("photos", MAX_REVIEW_PHOTOS)(req, res, error => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError) {
+      return res.status(400).json({ error: MULTER_LIMIT_MESSAGES[error.code] || "That upload couldn't be read. Please try again." });
+    }
+    next(error);
+  });
+}
+
 // Best-effort — a review whose photo file is already gone (or never
 // finished writing) shouldn't block deleting/replacing the review itself.
-function deleteReviewPhotoFiles(photoUrls) {
-  for (const url of photoUrls || []) {
-    fs.unlink(path.join(REVIEW_PHOTOS_DIR, path.basename(url)), () => {});
+// Takes stored photos (objects or legacy URL strings) or multer files.
+function deleteReviewPhotoFiles(photos) {
+  for (const photo of photos || []) {
+    const file = typeof photo === "string" ? photo : photo.url || photo.filename;
+    if (file) fs.unlink(path.join(REVIEW_PHOTOS_DIR, path.basename(file)), () => {});
   }
+}
+
+// Each review photo is stored as { url, category, category_source,
+// uploadedAt } so it can join the restaurant's photo stack and be filtered
+// (see the gallery in index.html). Reviews written before categories
+// existed stored bare URL strings — read those as unlabeled.
+const REVIEW_PHOTO_CATEGORIES = ["food", "atmosphere", "place"];
+
+function normalizeReviewPhotos(photos) {
+  return (photos || []).map(p => typeof p === "string"
+    ? { url: p, category: null, category_source: null, uploadedAt: null }
+    : p);
+}
+
+const PHOTO_LABEL_SCHEMA = {
+  type: "object",
+  properties: {
+    category: { type: "string", enum: ["food", "atmosphere", "place", "other"] },
+    problem: { type: "string", enum: ["none", "qr_code", "promotion", "explicit", "violence", "hateful", "personal_info"] },
+  },
+  required: ["category", "problem"],
+  additionalProperties: false,
+};
+
+// What the guest is told when a photo is blocked — specific enough to fix
+// (crop out the QR code), vague enough not to coach around the check.
+const PHOTO_PROBLEM_MESSAGES = {
+  qr_code: "Photos with QR codes or barcodes can't be posted — crop it out or pick another photo.",
+  promotion: "Photos with ads, links or contact details can't be posted. Please choose a different one.",
+  personal_info: "That photo shows personal details (like a card or ID). Please choose a different one.",
+};
+const PHOTO_PROBLEM_DEFAULT_MESSAGE = "One of your photos can't be posted here. Please choose a different one.";
+
+// One call per uploaded photo does two jobs: suggests a category (used
+// only when the uploader didn't pick one) and checks the photo is fit to
+// show publicly on a restaurant's page — guest photos appear to everyone.
+// Structured output keeps the answer machine-readable; a refusal is read
+// as "not safe", since declining to look at an image is itself the signal.
+async function labelReviewPhoto(filePath, mimeType) {
+  const data = fs.readFileSync(filePath).toString("base64");
+  const response = await client.beta.messages.create({
+    model: "claude-opus-5",
+    max_tokens: 2000,
+    // Server-side fallback: if a safety classifier declines, the request
+    // re-runs on a fallback model inside the same call instead of failing.
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    output_config: {
+      effort: "low", // a quick look, not deep reasoning
+      format: { type: "json_schema", schema: PHOTO_LABEL_SCHEMA },
+    },
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: mimeType, data } },
+        {
+          type: "text",
+          text: `A guest attached this photo to a restaurant review in a restaurant discovery app. It will be shown publicly in that restaurant's photo gallery.
+
+category — what the photo mainly shows:
+- "food": dishes, drinks or desserts as the subject
+- "atmosphere": the dining experience inside — the room, tables, lighting, decor, people dining
+- "place": the restaurant from outside — building, entrance, terrace, signage, the view or street
+- "other": anything else (menus, receipts, selfies unrelated to the meal, screenshots)
+
+problem — the first that applies, else "none":
+- "qr_code": any QR code or barcode someone could scan from the photo, even small (e.g. on a table stand or menu). Other people would scan it without knowing where it leads.
+- "promotion": the photo is mainly there to advertise or redirect — web addresses, social handles, phone numbers, discount codes or promo text added to or dominating the image. A restaurant's own sign or name in the shot is fine.
+- "explicit": nudity or sexual content
+- "violence": graphic violence, gore, or deliberately shocking/disturbing imagery
+- "hateful": hateful symbols or text
+- "personal_info": readable personal documents or details — IDs, payment cards, receipts showing card numbers
+Ordinary photos of people, alcohol, a dish the guest was unhappy with, or blurry/low-quality shots are "none".`,
+        },
+      ],
+    }],
+  });
+  if (response.stop_reason === "refusal") return { category: null, problem: "refused" };
+  const text = response.content.find(b => b.type === "text")?.text;
+  const parsed = JSON.parse(text);
+  return {
+    category: REVIEW_PHOTO_CATEGORIES.includes(parsed.category) ? parsed.category : null,
+    problem: parsed.problem === "none" ? null : parsed.problem,
+  };
+}
+
+// Builds the stored photo objects for a submission. The uploader's own
+// category choice wins; "auto" (the default) takes the AI suggestion. If
+// the AI call itself fails, the photo still posts, unlabeled and unchecked
+// (logged) — a broken external call shouldn't block a review, and a
+// "Report" path is the backstop. Returns { photos } or { blocked: message }.
+async function prepareReviewPhotos(files, requestedCategories) {
+  const now = Date.now();
+  const results = await Promise.all(files.map(async (f, i) => {
+    const requested = requestedCategories[i];
+    const userChoice = REVIEW_PHOTO_CATEGORIES.includes(requested) ? requested : requested === "other" ? null : undefined;
+    let label = null;
+    try {
+      label = await labelReviewPhoto(f.path, f.mimetype);
+    } catch (error) {
+      console.error(`Photo labeling failed for ${f.filename}:`, error.message);
+    }
+    return {
+      problem: label?.problem || null,
+      photo: {
+        url: `/review-photos/${f.filename}`,
+        category: userChoice !== undefined ? userChoice : (label?.category ?? null),
+        category_source: userChoice !== undefined ? "user" : label ? "ai" : null,
+        uploadedAt: now,
+      },
+    };
+  }));
+  const blocked = results.find(r => r.problem);
+  if (blocked) return { blocked: PHOTO_PROBLEM_MESSAGES[blocked.problem] || PHOTO_PROBLEM_DEFAULT_MESSAGE };
+  return { photos: results.map(r => r.photo) };
 }
 
 // One review per signed-in user per place — posting again replaces your
@@ -1350,7 +1561,7 @@ function deleteReviewPhotoFiles(photoUrls) {
 // rating/note) rather than piling up duplicates from the same person.
 // Always multipart (even with no photos attached) so one code path covers
 // both — see reviewPhotoUpload above.
-app.post("/reviews", reviewsLimiter, requireAuth, reviewPhotoUpload.array("photos", 3), (req, res) => {
+app.post("/reviews", reviewsLimiter, requireAuth, acceptReviewPhotos, async (req, res) => {
   const { place_id, rating, foodRating, serviceRating, atmosphereRating, text } = req.body;
   // The overall rating is the one mandatory number — most people just want
   // to rate the whole visit, not break it into categories. Food/service/
@@ -1358,16 +1569,22 @@ app.post("/reviews", reviewsLimiter, requireAuth, reviewPhotoUpload.array("photo
   // to give it (no AI involved in scoring or writing any of this, see the
   // review-editor's own comment on that) — "rating" is exactly what the
   // person picked for it, never derived from the category scores.
+  // multer has already written any attached photos to disk by now — every
+  // rejection below has to remove them again, or they'd pile up orphaned.
+  const reject = (status, error) => {
+    deleteReviewPhotoFiles(req.files);
+    return res.status(status).json({ error });
+  };
   const ratingNum = Number(rating);
   if (!place_id || !Number.isInteger(ratingNum) || ratingNum < 1 || ratingNum > 5) {
-    return res.status(400).json({ error: "place_id and an overall rating from 1 to 5 are required" });
+    return reject(400, "place_id and an overall rating from 1 to 5 are required");
   }
   const categories = {};
   for (const [key, raw] of Object.entries({ food: foodRating, service: serviceRating, atmosphere: atmosphereRating })) {
     if (raw === undefined || raw === null || raw === "") continue;
     const n = Number(raw);
     if (!Number.isInteger(n) || n < 1 || n > 5) {
-      return res.status(400).json({ error: `${key[0].toUpperCase()}${key.slice(1)} rating must be a whole number from 1 to 5` });
+      return reject(400, `${key[0].toUpperCase()}${key.slice(1)} rating must be a whole number from 1 to 5`);
     }
     categories[key] = n;
   }
@@ -1377,7 +1594,7 @@ app.post("/reviews", reviewsLimiter, requireAuth, reviewPhotoUpload.array("photo
   // solution. Rejects rather than masking with asterisks: a silently
   // censored public review reads as broken, not moderated.
   if (leoProfanity.check(trimmedText)) {
-    return res.status(400).json({ error: "Please remove inappropriate language from your review." });
+    return reject(400, "Please remove inappropriate language from your review.");
   }
   const now = Date.now();
   const existing = reviews.find(r => r.place_id === place_id && r.userId === req.user.sub);
@@ -1385,11 +1602,29 @@ app.post("/reviews", reviewsLimiter, requireAuth, reviewPhotoUpload.array("photo
   // "edit in place" semantics, matching rating/text) — but if none were
   // attached this time, leave whatever was already there untouched, so a
   // quick text-only edit doesn't silently wipe someone's photos.
-  const newPhotoUrls = (req.files || []).map(f => `/review-photos/${f.filename}`);
+  // photo_categories is a JSON array aligned with the uploaded files, each
+  // "auto" | "food" | "atmosphere" | "place" | "other".
+  let requestedCategories = [];
+  try {
+    const raw = JSON.parse(req.body.photo_categories || "[]");
+    if (Array.isArray(raw)) requestedCategories = raw;
+  } catch { /* treat as all "auto" */ }
+  const uploads = req.files || [];
+  if (uploads.length > 0 && uploads.length > reviewPhotoQuotaLeft(req.user.sub)) {
+    return reject(429, `You've uploaded a lot of photos today (limit ${REVIEW_PHOTO_DAILY_LIMIT} per day). Post without new photos, or try again tomorrow.`);
+  }
+  // Counted before the check runs: the AI call is the cost being bounded,
+  // whether or not the photo then passes.
+  recordReviewPhotoUploads(req.user.sub, uploads.length);
+  const prepared = await prepareReviewPhotos(uploads, requestedCategories);
+  if (prepared.blocked) {
+    return reject(400, prepared.blocked);
+  }
+  const newPhotos = prepared.photos;
   if (existing) {
-    if (newPhotoUrls.length > 0) {
+    if (newPhotos.length > 0) {
       deleteReviewPhotoFiles(existing.photos);
-      existing.photos = newPhotoUrls;
+      existing.photos = newPhotos;
     }
     existing.rating = ratingNum;
     existing.foodRating = categories.food ?? null;
@@ -1411,13 +1646,34 @@ app.post("/reviews", reviewsLimiter, requireAuth, reviewPhotoUpload.array("photo
       serviceRating: categories.service ?? null,
       atmosphereRating: categories.atmosphere ?? null,
       text: trimmedText,
-      photos: newPhotoUrls,
+      photos: newPhotos,
       createdAt: now,
       updatedAt: now,
     });
   }
   saveReviews(reviews);
   res.json({ ok: true });
+});
+
+// "Helpful" votes — upvote only, deliberately no downvote: on a restaurant
+// review a downvote mostly means "I disagree about the place", which says
+// nothing about the review's quality and invites pile-ons. One vote per
+// user per review (stored as a list of user ids, so it can't be inflated),
+// posting again removes it, and nobody can vote on their own review.
+// Votes survive the author editing their review, same as on Google Maps.
+// Own limiter so a burst of taps doesn't eat the review-writing budget.
+const helpfulLimiter = rateLimiter({ windowMs: 60 * 1000, max: 30 });
+app.post("/reviews/:id/helpful", helpfulLimiter, requireAuth, (req, res) => {
+  const target = reviews.find(r => r.id === req.params.id);
+  if (!target) return res.status(404).json({ error: "Review not found" });
+  if (target.userId === req.user.sub) {
+    return res.status(400).json({ error: "You can't mark your own review as helpful" });
+  }
+  const votes = target.helpful || [];
+  const voted = !votes.includes(req.user.sub);
+  target.helpful = voted ? [...votes, req.user.sub] : votes.filter(id => id !== req.user.sub);
+  saveReviews(reviews);
+  res.json({ ok: true, votedHelpful: voted, helpfulCount: target.helpful.length });
 });
 
 // Deletes only the signed-in user's own review for this place — ownership
@@ -1434,9 +1690,9 @@ app.delete("/reviews", reviewsLimiter, requireAuth, (req, res) => {
 });
 
 // Server-side twin of index.html's escapeHtml — every value that goes into
-// the reservation email (name, notes, contact info...) is either typed by
-// the customer or Google-sourced, and ends up rendered as HTML in a
-// restaurant's mail client.
+// a reservation email or page (name, notes, contact info, a restaurant's
+// message...) is typed by someone or Google-sourced, and ends up rendered
+// as HTML in a mail client or browser.
 const EMAIL_ESCAPE_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 function escapeForEmail(str) {
   if (str === null || str === undefined) return "";
@@ -1450,12 +1706,13 @@ async function translateText(text, targetLang) {
   return text;
 }
 
-// The tokens are the only thing that authorizes a confirm/decline (see the
-// /reservations/confirm route) — nothing the app itself returns to the
-// browser should ever contain them, or the customer could confirm their own
-// request.
+// The respond token is the only thing that authorizes a restaurant's answer
+// (see /reservations/respond) — nothing the app returns to the browser may
+// contain it, or a guest could answer their own request. confirm_/
+// decline_token are the older per-button tokens, still honored for emails
+// sent before the respond page existed (see the legacy routes below).
 function publicReservation(r) {
-  const { confirm_token, decline_token, ...rest } = r;
+  const { confirm_token, decline_token, respond_token, ...rest } = r;
   return rest;
 }
 
@@ -1464,11 +1721,8 @@ function publicReservation(r) {
 // the server's own timezone can never shift it a day either way. Falls
 // back to the raw string for anything that isn't a plain YYYY-MM-DD.
 function formatReservationDate(dateStr, locale = "en-GB") {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || "")) return dateStr;
+  if (!isRealDate(dateStr)) return dateStr;
   const d = new Date(`${dateStr}T00:00:00Z`);
-  // Round-trip check: Date quietly rolls "2026-02-29" over to 1 March,
-  // which would tell the restaurant a date the guest never picked.
-  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== dateStr) return dateStr;
   try {
     return new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(d);
   } catch {
@@ -1476,53 +1730,348 @@ function formatReservationDate(dateStr, locale = "en-GB") {
   }
 }
 
-function buildReservationEmailBody(r, labels, confirmUrl, declineUrl, locale = "en-GB") {
-  const row = (label, value) => `
+function formatSlot(date, time) {
+  return `${formatReservationDate(date)} at ${time}`;
+}
+
+// ── Reservation time handling ──
+// date/time are the restaurant's local wall-clock time. The server has no
+// idea what timezone that is, so the guest's browser sends its UTC offset
+// (Date#getTimezoneOffset, minutes) with the request — the guest is almost
+// always in the same city as the restaurant they're booking. That's what
+// makes "has this time passed?" (expiry, no bookings in the past) mean the
+// same thing it means on the guest's own clock.
+const RESERVATION_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// Round-trip check: Date quietly rolls "2026-02-29" over to 1 March, which
+// would tell the restaurant a date the guest never picked.
+function isRealDate(dateStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || "")) return false;
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === dateStr;
+}
+
+function slotTimestamp(date, time, tzOffset) {
+  const [y, mo, d] = date.split("-").map(Number);
+  const [h, mi] = time.split(":").map(Number);
+  return Date.UTC(y, mo - 1, d, h, mi) + (tzOffset || 0) * 60 * 1000;
+}
+
+function isPastSlot(date, time, tzOffset) {
+  return slotTimestamp(date, time, tzOffset) < Date.now();
+}
+
+// ── Bookable times ──
+// Reservations are offered in quarter-hour steps inside the restaurant's
+// own opening hours (Google's weekly "periods"), never at a stray 18:28,
+// and never in the past or right on top of now.
+const SLOT_STEP_MIN = 15;
+// Assumption, not a Google field: the last table goes an hour before
+// closing (a 23:45 booking at a place closing at midnight isn't a real
+// option). Short openings still get their first slot (see bookableSlotsOn).
+const LAST_BOOKING_BEFORE_CLOSE_MIN = 60;
+// What the app offers: at 18:00 the first choice is 18:15.
+const BOOKING_LEAD_MIN = 15;
+// What the server accepts: a few minutes less, so a form that sat open
+// while someone picked a date doesn't bounce the slot it was offered.
+const BOOKING_LEAD_GRACE_MIN = 5;
+// Used only when Google has no hours for a place — still quarter-hours,
+// just not narrowed to when it's open (the modal says so).
+const FALLBACK_SLOT_RANGE = [6 * 60, 23 * 60 + 45];
+
+function clockToMinutes(t) {
+  const digits = String(t).replace(":", "");
+  return parseInt(digits.slice(0, 2), 10) * 60 + parseInt(digits.slice(2, 4), 10);
+}
+
+function minutesToClock(m) {
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
+function addDaysToDate(dateStr, n) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// The restaurant's own "now" — its Google utc_offset when known (right
+// even for a guest booking from another timezone), else the guest's
+// browser offset (the same fallback the rest of this file uses).
+function restaurantNow(utcOffsetMin, guestTzOffset) {
+  const offset = typeof utcOffsetMin === "number" ? utcOffsetMin : -(guestTzOffset || 0);
+  const d = new Date(Date.now() + offset * 60 * 1000);
+  return { date: d.toISOString().slice(0, 10), minutes: d.getUTCHours() * 60 + d.getUTCMinutes() };
+}
+
+// Opening intervals touching one calendar date, as [start, end) minutes
+// from that date's midnight. Google periods use day 0 = Sunday and can run
+// past midnight (close.day is the next day), so the previous day's late
+// opening also contributes its after-midnight tail. null = hours unknown.
+function openIntervalsOn(periods, date) {
+  if (!Array.isArray(periods) || periods.length === 0) return null;
+  const alwaysOpen = periods.length === 1 && periods[0].open?.time === "0000" && !periods[0].close;
+  // Runs on into the next day, so the "last booking before close" cut-off
+  // never eats into 23:00–23:45 — a 24h place doesn't close at midnight.
+  if (alwaysOpen) return [[0, 2 * 24 * 60]];
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+  const intervals = [];
+  for (const p of periods) {
+    if (!p.open || !p.close) continue;
+    const openMin = clockToMinutes(p.open.time);
+    let spanDays = (p.close.day - p.open.day + 7) % 7;
+    let closeMin = clockToMinutes(p.close.time) + spanDays * 24 * 60;
+    if (closeMin <= openMin) closeMin += 24 * 60; // same-day "close" before "open" means past midnight
+    if (p.open.day === weekday) intervals.push([openMin, closeMin]);
+    if ((p.open.day + 1) % 7 === weekday && closeMin > 24 * 60) intervals.push([openMin - 24 * 60, closeMin - 24 * 60]);
+  }
+  return intervals;
+}
+
+// Every quarter-hour a table could start on that date, ignoring "now".
+function bookableSlotsOn(periods, date) {
+  const intervals = openIntervalsOn(periods, date);
+  if (intervals === null) return null;
+  const slots = new Set();
+  for (const [start, end] of intervals) {
+    const last = Math.max(start, end - LAST_BOOKING_BEFORE_CLOSE_MIN);
+    for (let m = Math.ceil(Math.max(start, 0) / SLOT_STEP_MIN) * SLOT_STEP_MIN; m <= last && m < 24 * 60; m += SLOT_STEP_MIN) {
+      slots.add(m);
+    }
+  }
+  return [...slots].sort((a, b) => a - b);
+}
+
+function fallbackSlots() {
+  const out = [];
+  for (let m = FALLBACK_SLOT_RANGE[0]; m <= FALLBACK_SLOT_RANGE[1]; m += SLOT_STEP_MIN) out.push(m);
+  return out;
+}
+
+// Slots actually on offer for a date, given the restaurant's current local
+// time and how much notice is required.
+function availableSlots(periods, date, now, leadMin) {
+  const known = bookableSlotsOn(periods, date);
+  let slots = known === null ? fallbackSlots() : known;
+  if (date < now.date) slots = [];
+  else if (date === now.date) slots = slots.filter(m => m >= now.minutes + leadMin);
+  return { slots, hoursKnown: known !== null };
+}
+
+// "12:00–14:30, 17:30–00:00" for the modal's hint line.
+function openRangesLabel(periods, date) {
+  const intervals = openIntervalsOn(periods, date);
+  if (!intervals) return [];
+  if (intervals.some(([a, b]) => a <= 0 && b >= 24 * 60)) return ["24 hours"];
+  return intervals
+    .map(([a, b]) => [Math.max(a, 0), Math.min(b, 24 * 60)])
+    .filter(([a, b]) => b > a)
+    .sort((x, y) => x[0] - y[0])
+    .map(([a, b]) => `${minutesToClock(a)}–${minutesToClock(b % (24 * 60))}`);
+}
+
+// Earliest and latest bookable time across the whole week — bounds the
+// restaurant's own "suggest another time" dropdown (see renderRespondPage).
+function weeklySlotWindow(periods) {
+  let first = null, last = null;
+  const monday = "2026-01-05"; // any Monday; only the weekday matters
+  for (let i = 0; i < 7; i++) {
+    const slots = bookableSlotsOn(periods, addDaysToDate(monday, i)) || [];
+    if (slots.length === 0) continue;
+    first = first === null ? slots[0] : Math.min(first, slots[0]);
+    last = last === null ? slots[slots.length - 1] : Math.max(last, slots[slots.length - 1]);
+  }
+  return first === null ? null : { first: minutesToClock(first), last: minutesToClock(last) };
+}
+
+// Statuses that still hold (or might still hold) a table. Everything else
+// is closed for good: declined, cancelled, expired.
+const ACTIVE_RESERVATION_STATUSES = new Set(["pending", "alternatives_offered", "confirmed"]);
+
+// Expiry is applied lazily, whenever a reservation is read, rather than by
+// a timer — nothing needs to happen at the exact moment a slot passes,
+// only that nobody (guest or restaurant) ever sees a dead request as still
+// open. A request nobody answered before its own time is "expired"; so is
+// a set of suggested times the guest never picked from before all of them
+// passed.
+function applyExpiry(r) {
+  const unanswered = r.status === "pending" && isPastSlot(r.date, r.time, r.tz_offset);
+  const unpicked = r.status === "alternatives_offered" &&
+    (r.alternatives || []).every(a => isPastSlot(a.date, a.time, r.tz_offset));
+  if (!unanswered && !unpicked) return false;
+  // When it really expired — the slot passing — not when we happened to
+  // notice (this runs lazily on read). Retention counts from here, so a
+  // request nobody looked at for a month doesn't get a fresh 30 days.
+  r.expired_at = unanswered
+    ? slotTimestamp(r.date, r.time, r.tz_offset)
+    : Math.max(...r.alternatives.map(a => slotTimestamp(a.date, a.time, r.tz_offset)));
+  r.expired_from = r.status;
+  r.status = "expired";
+  r.updatedAt = Date.now();
+  r.guest_unseen = true;
+  return true;
+}
+
+// ── Retention ──
+// Bookings hold personal data (name, email, contact info, notes), so ended
+// ones don't live forever: they drop off the guest's Bookings list after
+// 30 days and are deleted from the server after 90 — the gap covers things
+// like a restaurant asking about a no-show. Guests can also delete one
+// themselves straight away (DELETE /reservations/:id).
+const DAY_MS = 24 * 60 * 60 * 1000;
+const BOOKING_HISTORY_VISIBLE_MS = 30 * DAY_MS;
+const BOOKING_RETENTION_MS = 90 * DAY_MS;
+
+// Closed for good: declined/cancelled/expired, or confirmed and its time
+// has passed. Still-open requests and upcoming tables aren't.
+function isReservationClosed(r) {
+  if (!ACTIVE_RESERVATION_STATUSES.has(r.status)) return true;
+  return r.status === "confirmed" && isPastSlot(r.date, r.time, r.tz_offset);
+}
+
+// When a closed booking "ended": a confirmed one at its own time; a
+// cancelled/declined/expired one at whichever is later of when it closed
+// and its original time — a table cancelled today for next month stays in
+// history until a while after that date, not just from today.
+function reservationEndedAt(r) {
+  if (!isReservationClosed(r)) return null;
+  let slot = NaN;
+  try { slot = slotTimestamp(r.date, r.time, r.tz_offset); } catch { /* malformed legacy row */ }
+  if (Number.isNaN(slot)) return r.updatedAt || r.createdAt || 0;
+  if (r.status === "expired" && r.expired_at) return r.expired_at;
+  return r.status === "confirmed" ? slot : Math.max(slot, r.updatedAt || 0);
+}
+
+function purgeOldReservations() {
+  const cutoff = Date.now() - BOOKING_RETENTION_MS;
+  const kept = reservations.filter(r => {
+    const endedAt = reservationEndedAt(r);
+    return endedAt === null || endedAt > cutoff;
+  });
+  const removed = reservations.length - kept.length;
+  if (removed > 0) {
+    reservations = kept;
+    saveReservations(reservations);
+    console.log(`[reservations] Deleted ${removed} booking${removed === 1 ? "" : "s"} that ended over ${BOOKING_RETENTION_MS / DAY_MS} days ago`);
+  }
+}
+
+function expireAndSave(list) {
+  let changed = false;
+  for (const r of list) if (applyExpiry(r)) changed = true;
+  if (changed) saveReservations(reservations);
+}
+
+// ── Email sending ──
+// Calls Resend's HTTP API directly through axios (already a dependency)
+// rather than pulling in their SDK. Without RESEND_API_KEY nothing is sent;
+// the subject and any action links are logged instead, so every flow can
+// be clicked through locally without a real email account.
+function wrapEmailHtml(inner) {
+  return `<div style="font-family:Helvetica,Arial,sans-serif;color:#1a1715;max-width:560px;">
+    <p style="margin:0 0 18px;padding-bottom:10px;border-bottom:2px solid #8B3A1F;font-family:Georgia,serif;font-size:18px;color:#8B3A1F;">Restaurant Discovery</p>
+    ${inner}
+  </div>`;
+}
+
+async function sendEmail({ to, subject, html, replyTo, logLinks }) {
+  if (!RESEND_API_KEY) {
+    console.log(`[reservations] RESEND_API_KEY not set, not emailing ${to}: "${subject}"`);
+    for (const [label, url] of Object.entries(logLinks || {})) console.log(`  ${label}: ${url}`);
+    return;
+  }
+  await axios.post(
+    "https://api.resend.com/emails",
+    {
+      // A display name makes it read as coming from a real service rather
+      // than a bare, anonymous-looking address. Left alone if the env var
+      // already carries its own "Name <address>" form.
+      from: RESERVATION_FROM_EMAIL.includes("<") ? RESERVATION_FROM_EMAIL : `Restaurant Discovery <${RESERVATION_FROM_EMAIL}>`,
+      to: [to],
+      reply_to: replyTo || undefined,
+      subject,
+      html: wrapEmailHtml(html),
+    },
+    { headers: { Authorization: `Bearer ${RESEND_API_KEY}` }, timeout: 10000 }
+  );
+}
+
+// For notices that follow an action which has already happened (the guest
+// cancelled, the restaurant confirmed...) — a failed notice mustn't undo or
+// block that action, so this reports success instead of throwing, and the
+// caller decides what to tell the person (e.g. "call them instead").
+async function trySendEmail(options, what) {
+  try {
+    await sendEmail(options);
+    return true;
+  } catch (error) {
+    console.error(`${what} email failed:`, error.response?.data || error.message);
+    return false;
+  }
+}
+
+function emailButton(url, label, color) {
+  return `<a href="${escapeForEmail(url)}" style="display:inline-block;background:${color};color:#fff;text-decoration:none;padding:10px 18px;border-radius:999px;font-weight:600;margin:0 8px 8px 0;">${escapeForEmail(label)}</a>`;
+}
+
+function emailDetailsTable(rows) {
+  return `<table style="border-collapse:collapse;font-size:14px;margin:0 0 18px;">
+    ${rows.filter(([, value]) => value !== null && value !== undefined && value !== "").map(([label, value]) => `
     <tr>
       <td style="padding:6px 12px 6px 0;color:#6b5f55;vertical-align:top;">${escapeForEmail(label)}</td>
       <td style="padding:6px 0;color:#1a1715;">${escapeForEmail(value)}</td>
-    </tr>`;
-  return `
-    <p style="margin:0 0 12px;">${escapeForEmail(labels.intro)}</p>
-    <table style="border-collapse:collapse;font-size:14px;margin:0 0 18px;">
-      ${row(labels.date, formatReservationDate(r.date, locale))}
-      ${row(labels.time, r.time)}
-      ${row(labels.partySize, r.party_size)}
-      ${row(labels.name, r.customer_name)}
-      ${row(labels.contact, r.contact_info)}
-      ${r.notes ? row(labels.notes, r.notes) : ""}
-    </table>
-    <p style="margin:0 0 20px;">
-      <a href="${escapeForEmail(confirmUrl)}" style="display:inline-block;background:#2e7d32;color:#fff;text-decoration:none;padding:10px 20px;border-radius:999px;font-weight:600;margin-right:8px;">${escapeForEmail(labels.confirm)}</a>
-      <a href="${escapeForEmail(declineUrl)}" style="display:inline-block;background:#c62828;color:#fff;text-decoration:none;padding:10px 20px;border-radius:999px;font-weight:600;">${escapeForEmail(labels.decline)}</a>
-    </p>
-    <p style="margin:0 0 20px;font-size:13px;color:#6b5f55;">${escapeForEmail(labels.replyHint)}</p>`;
+    </tr>`).join("")}
+  </table>`;
 }
 
-// Calls Resend's HTTP API directly through axios (already a dependency)
-// rather than pulling in their SDK for one POST. Throws on a failed send so
-// the caller can refuse to record a request the restaurant never received.
-async function sendReservationEmail(r) {
-  const confirmUrl = `${BASE_URL}/reservations/confirm?token=${r.confirm_token}`;
-  const declineUrl = `${BASE_URL}/reservations/decline?token=${r.decline_token}`;
+function emailParagraph(text, muted = false) {
+  return `<p style="margin:0 0 ${muted ? 20 : 12}px;${muted ? "font-size:13px;color:#6b5f55;" : ""}">${escapeForEmail(text)}</p>`;
+}
 
-  if (!RESEND_API_KEY) {
-    console.log(`[reservations] RESEND_API_KEY not set, not emailing ${r.restaurant_email}. Links for reservation ${r.id}:`);
-    console.log(`  Confirm: ${confirmUrl}`);
-    console.log(`  Decline: ${declineUrl}`);
-    return;
-  }
+// A restaurant's own words, visibly theirs rather than the app's.
+function emailQuote(text, who) {
+  return `<blockquote style="margin:0 0 18px;padding:8px 14px;border-left:3px solid #8B3A1F;background:#f7f2ea;color:#1a1715;">
+    ${escapeForEmail(text)}<br><span style="font-size:12px;color:#6b5f55;">${escapeForEmail(who)}</span>
+  </blockquote>`;
+}
 
+function respondUrl(r, action) {
+  return `${BASE_URL}/reservations/respond?token=${r.respond_token}${action ? `&action=${action}` : ""}`;
+}
+
+function buildRequestEmailBody(r, labels, locale = "en-GB") {
+  return `
+    ${emailParagraph(labels.intro)}
+    ${emailDetailsTable([
+      [labels.date, formatReservationDate(r.date, locale)],
+      [labels.time, r.time],
+      [labels.partySize, r.party_size],
+      [labels.name, r.customer_name],
+      [labels.contact, r.contact_info],
+      [labels.notes, r.notes],
+    ])}
+    <p style="margin:0 0 12px;">
+      ${emailButton(respondUrl(r, "confirm"), labels.confirm, "#2e7d32")}
+      ${emailButton(respondUrl(r, "suggest"), labels.suggest, "#8B3A1F")}
+      ${emailButton(respondUrl(r, "decline"), labels.decline, "#c62828")}
+    </p>
+    ${emailParagraph(labels.replyHint, true)}`;
+}
+
+// The request itself. Throws on a failed send (unlike the notices below),
+// so POST /reservations can refuse to record a request the restaurant never
+// received.
+async function sendReservationRequestEmail(r) {
   const englishLabels = {
     intro: `You have a new reservation request for ${r.restaurant_name}.`,
     date: "Date", time: "Time", partySize: "Party size", name: "Name",
-    contact: "Contact", notes: "Notes", confirm: "Confirm", decline: "Decline",
-    // Reply already reaches the guest (see reply_to below), but nothing in
+    contact: "Contact", notes: "Notes",
+    confirm: "Confirm", suggest: "Suggest another time", decline: "Decline",
+    // Reply already reaches the guest (see replyTo below), but nothing in
     // a typical email says so — without this, staff with a question would
     // assume it's a no-reply robot and not bother.
     replyHint: `Questions? Just reply to this email to reach ${r.customer_name || "the guest"} directly.`,
   };
-  let html = buildReservationEmailBody(r, englishLabels, confirmUrl, declineUrl);
+  let html = buildRequestEmailBody(r, englishLabels);
 
   // Translated copy goes *below* the English one rather than replacing it —
   // whoever opens the email can use whichever language they read, and a
@@ -1531,39 +2080,89 @@ async function sendReservationEmail(r) {
     const keys = Object.keys(englishLabels);
     const translated = await Promise.all(keys.map(k => translateText(englishLabels[k], r.restaurant_lang)));
     const translatedLabels = Object.fromEntries(keys.map((k, i) => [k, translated[i]]));
-    const changed = keys.some(k => translatedLabels[k] !== englishLabels[k]);
-    if (changed) {
+    if (keys.some(k => translatedLabels[k] !== englishLabels[k])) {
       html += `<hr style="border:none;border-top:1px solid #e5ddd3;margin:8px 0 20px;">`;
-      html += buildReservationEmailBody(r, translatedLabels, confirmUrl, declineUrl, r.restaurant_lang);
+      html += buildRequestEmailBody(r, translatedLabels, r.restaurant_lang);
     }
   }
 
-  await axios.post(
-    "https://api.resend.com/emails",
-    {
-      // A display name makes it read as coming from a real service rather
-      // than a bare, anonymous-looking address. Left alone if the env var
-      // already carries its own "Name <address>" form.
-      from: RESERVATION_FROM_EMAIL.includes("<") ? RESERVATION_FROM_EMAIL : `Restaurant Discovery <${RESERVATION_FROM_EMAIL}>`,
-      to: [r.restaurant_email],
-      // Lets staff just hit Reply to reach the customer with questions,
-      // instead of the request being a dead-end no-reply message.
-      reply_to: r.customer_email,
-      subject: `Reservation request: ${r.party_size} ${r.party_size === 1 ? "guest" : "guests"} on ${formatReservationDate(r.date)} at ${r.time}`,
-      html: `<div style="font-family:Helvetica,Arial,sans-serif;color:#1a1715;max-width:560px;">
-        <p style="margin:0 0 18px;padding-bottom:10px;border-bottom:2px solid #8B3A1F;font-family:Georgia,serif;font-size:18px;color:#8B3A1F;">Restaurant Discovery</p>
-        ${html}
-      </div>`,
-    },
-    { headers: { Authorization: `Bearer ${RESEND_API_KEY}` }, timeout: 10000 }
+  await sendEmail({
+    to: r.restaurant_email,
+    // Lets staff just hit Reply to reach the guest with questions, instead
+    // of the request being a dead-end no-reply message.
+    replyTo: r.customer_email,
+    subject: `Reservation request: ${r.party_size} ${r.party_size === 1 ? "guest" : "guests"} on ${formatSlot(r.date, r.time)}`,
+    html,
+    logLinks: { Respond: respondUrl(r), Confirm: respondUrl(r, "confirm"), Suggest: respondUrl(r, "suggest"), Decline: respondUrl(r, "decline") },
+  });
+}
+
+// Tells the guest the restaurant answered. Reply-to is the restaurant, so
+// the guest can write back to them directly.
+function sendGuestUpdateEmail(r) {
+  const who = r.restaurant_name;
+  const openApp = `<p style="margin:0 0 12px;">${emailButton(BASE_URL, "Open your bookings", "#8B3A1F")}</p>`;
+  const quote = r.restaurant_message ? emailQuote(r.restaurant_message, `${who}`) : "";
+  let subject, html;
+  if (r.status === "confirmed") {
+    subject = `${who} confirmed your table`;
+    html = emailParagraph(`Your table at ${who} is confirmed.`) +
+      emailDetailsTable([["Date", formatReservationDate(r.date)], ["Time", r.time], ["Party size", r.party_size]]) +
+      quote + openApp;
+  } else if (r.status === "alternatives_offered") {
+    subject = `${who} suggested another time`;
+    html = emailParagraph(`${who} can't do ${formatSlot(r.date, r.time)}, but suggested:`) +
+      `<ul style="margin:0 0 16px;padding-left:20px;">${r.alternatives.map(a => `<li style="margin-bottom:4px;">${escapeForEmail(formatSlot(a.date, a.time))}</li>`).join("")}</ul>` +
+      quote + emailParagraph("Pick one in the app and your table is confirmed straight away.") + openApp;
+  } else if (r.status === "declined") {
+    subject = `${who} can't take your reservation`;
+    html = emailParagraph(r.no_reservations
+      ? `${who} doesn't take reservations at all. Just walk in.`
+      : `${who} can't take your request for ${formatSlot(r.date, r.time)}.`) +
+      quote + (r.no_reservations ? "" : emailParagraph("Try another time or another place in the app.")) + openApp;
+  } else {
+    return Promise.resolve(false);
+  }
+  return trySendEmail({ to: r.customer_email, replyTo: r.restaurant_email, subject, html }, `Guest update (${r.status})`);
+}
+
+// Tells the restaurant what the guest did, so they never hold a table for
+// someone who isn't coming (or miss that a suggestion was taken).
+function sendRestaurantUpdateEmail(r, kind) {
+  const guest = r.customer_name || "The guest";
+  const details = emailDetailsTable([
+    ["Date", formatReservationDate(r.date)], ["Time", r.time], ["Party size", r.party_size], ["Name", r.customer_name], ["Contact", r.contact_info],
+  ]);
+  const byKind = {
+    accepted: [
+      `${guest} accepted ${r.time} on ${formatReservationDate(r.date)}`,
+      `${guest} picked one of the times you suggested. The table is confirmed:`,
+    ],
+    declined_alternatives: [
+      `${guest} can't make the suggested times`,
+      `${guest} can't make any of the times you suggested, so the request is closed. No need to hold a table.`,
+    ],
+    withdrew_request: [
+      `${guest} withdrew their reservation request`,
+      `${guest} withdrew this request before you answered it. No need to reply.`,
+    ],
+    cancelled_booking: [
+      `Cancellation: ${guest}, ${formatSlot(r.date, r.time)}`,
+      `${guest} cancelled their confirmed reservation. The table is free again:`,
+    ],
+  };
+  const [subject, intro] = byKind[kind];
+  return trySendEmail(
+    { to: r.restaurant_email, replyTo: r.customer_email, subject, html: emailParagraph(intro) + details },
+    `Restaurant update (${kind})`
   );
 }
 
-// Standalone HTML (inline <style>, no external assets) — restaurant staff
-// land here straight from their inbox, not signed into the app, so this
-// can't lean on index.html's JS or style.css at all.
-function renderReservationPage(title, message, tone) {
-  const accent = tone === "confirmed" ? "#2e7d32" : tone === "declined" ? "#c62828" : "#8B3A1F";
+// ── Pages for restaurant staff ──
+// Standalone HTML (inline <style>, no external assets, no JavaScript) —
+// staff land here straight from their inbox, not signed into the app, so
+// none of this can lean on index.html or style.css.
+function renderStaffPage(title, bodyHtml, accent = "#8B3A1F") {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1571,21 +2170,147 @@ function renderReservationPage(title, message, tone) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeForEmail(title)}</title>
 <style>
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #F4EFE3; font-family: Helvetica, Arial, sans-serif; color: #1A1715; padding: 16px; box-sizing: border-box; }
-  .card { background: #fff; border-radius: 18px; padding: 32px 28px; max-width: 420px; width: 100%; text-align: center; box-shadow: 0 2px 16px rgba(0,0,0,0.08); border-top: 4px solid ${accent}; }
-  h1 { font-family: Georgia, serif; font-weight: 400; font-size: 24px; margin: 0 0 12px; color: ${accent}; }
-  p { margin: 0; line-height: 1.5; color: #4a403a; }
-  .brand { margin-top: 24px; font-size: 12px; color: #8B3A1F; letter-spacing: 0.08em; text-transform: uppercase; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #F4EFE3; font-family: Helvetica, Arial, sans-serif; color: #1A1715; padding: 16px; }
+  .card { background: #fff; border-radius: 18px; padding: 28px 24px; max-width: 460px; width: 100%; box-shadow: 0 2px 16px rgba(0,0,0,0.08); border-top: 4px solid ${accent}; }
+  .brand { margin: 0 0 14px; font-size: 12px; color: #8B3A1F; letter-spacing: 0.08em; text-transform: uppercase; }
+  h1 { font-family: Georgia, serif; font-weight: 400; font-size: 24px; margin: 0 0 6px; color: ${accent}; }
+  p { margin: 0 0 12px; line-height: 1.5; color: #4a403a; }
+  .lead { color: #6b5f55; margin-bottom: 16px; }
+  table { border-collapse: collapse; font-size: 14px; margin: 0 0 18px; width: 100%; }
+  td { padding: 5px 0; vertical-align: top; }
+  td:first-child { color: #6b5f55; width: 100px; padding-right: 12px; }
+  form { margin: 0; }
+  label { display: block; font-size: 12px; color: #6b5f55; margin: 0 0 10px; }
+  textarea, input, select { width: 100%; font: inherit; font-size: 14px; color: #1A1715; background: #F7F2EA; border: 1px solid #DDD3C5; border-radius: 10px; padding: 9px 10px; margin-top: 4px; }
+  textarea { resize: vertical; min-height: 56px; }
+  .slot { display: grid; grid-template-columns: 1.5fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .slot input, .slot select { margin-top: 0; }
+  button { width: 100%; border: none; border-radius: 999px; padding: 12px 16px; font: inherit; font-weight: 600; color: #fff; cursor: pointer; }
+  .green { background: #2e7d32; } .brandbtn { background: #8B3A1F; } .red { background: #c62828; }
+  details { border-top: 1px solid #EDE5D8; padding: 12px 0 0; margin-top: 14px; }
+  summary { cursor: pointer; font-weight: 600; margin-bottom: 12px; color: #1A1715; }
+  .error { background: #fbe6e4; color: #b3261e; border-radius: 10px; padding: 8px 12px; font-size: 14px; }
+  ul { margin: 0 0 14px; padding-left: 20px; color: #1A1715; }
+  .foot { font-size: 12px; color: #6b5f55; margin: 18px 0 0; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: #4a403a; margin-bottom: 12px; }
+  .check input { width: auto; margin: 2px 0 0; flex-shrink: 0; }
 </style>
 </head>
 <body>
   <div class="card">
-    <h1>${escapeForEmail(title)}</h1>
-    <p>${escapeForEmail(message)}</p>
     <p class="brand">Restaurant Discovery</p>
+    ${bodyHtml}
   </div>
 </body>
 </html>`;
+}
+
+// Simple one-message page — results, "already answered", errors.
+function renderReservationPage(title, message, tone) {
+  const accent = tone === "confirmed" ? "#2e7d32" : tone === "declined" || tone === "cancelled" ? "#c62828" : "#8B3A1F";
+  return renderStaffPage(title, `<h1>${escapeForEmail(title)}</h1><p>${escapeForEmail(message)}</p>`, accent);
+}
+
+function staffDetailsTable(r) {
+  const rows = [
+    ["Date", formatReservationDate(r.date)], ["Time", r.time], ["Party size", r.party_size],
+    ["Name", r.customer_name], ["Contact", r.contact_info], ["Notes", r.notes],
+  ].filter(([, v]) => v !== null && v !== undefined && v !== "");
+  return `<table>${rows.map(([k, v]) => `<tr><td>${escapeForEmail(k)}</td><td>${escapeForEmail(v)}</td></tr>`).join("")}</table>`;
+}
+
+// Where things stand once there's nothing left for the restaurant to do —
+// shown instead of the form, so a second click (or a click on a different
+// button in the same email) can never change an answer already given.
+function renderStaffStatusPage(r) {
+  const slot = formatSlot(r.date, r.time);
+  const guest = r.customer_name || "the guest";
+  switch (r.status) {
+    case "confirmed":
+      return renderReservationPage("Reservation confirmed", r.accepted_alternative
+        ? `${guest} picked ${slot} from your suggestions, so the table is confirmed for ${r.party_size}. Nothing more to do.`
+        : `This reservation for ${r.party_size} on ${slot} is confirmed. Nothing more to do.`, "confirmed");
+    case "alternatives_offered":
+      return renderStaffPage("Waiting for the guest", `
+        <h1>Waiting for the guest</h1>
+        <p>You suggested:</p>
+        <ul>${r.alternatives.map(a => `<li>${escapeForEmail(formatSlot(a.date, a.time))}</li>`).join("")}</ul>
+        <p>We'll email you as soon as ${escapeForEmail(guest)} picks one or says no.</p>`);
+    case "declined":
+      return renderReservationPage("Request declined", `You declined this request for ${slot}. ${guest} has been told.`, "declined");
+    case "cancelled":
+      return renderReservationPage("Cancelled by the guest", `${guest} cancelled this request for ${slot}. No need to hold a table.`, "cancelled");
+    case "expired":
+      return renderReservationPage("Request expired", `The requested time has passed without the reservation being settled, so it's closed.`, "expired");
+    default:
+      return renderReservationPage("Nothing to do", "This request has already been handled.", "other");
+  }
+}
+
+// The one page restaurants answer on. Three plain HTML forms, no JS —
+// works in any mail app's in-app browser. The email's buttons only open
+// this page (action= just unfolds the matching section); nothing changes
+// until someone presses a button here, which also means link scanners in
+// mail security tools, which open every link to check it, can't confirm or
+// decline a request by accident.
+function renderRespondPage(r, { action = null, error = null, values = {} } = {}) {
+  const today = new Date().toISOString().slice(0, 10);
+  // Quarter-hours within the restaurant's usual weekly hours (from Google,
+  // snapshotted at request time); the whole day if those are unknown.
+  const hoursWindow = r.hours_window;
+  const firstMin = hoursWindow ? clockToMinutes(hoursWindow.first) : FALLBACK_SLOT_RANGE[0];
+  const lastMin = hoursWindow ? clockToMinutes(hoursWindow.last) : FALLBACK_SLOT_RANGE[1];
+  const timeOptions = (selected) => {
+    let html = `<option value="">Time</option>`;
+    for (let m = firstMin; m <= lastMin; m += SLOT_STEP_MIN) {
+      const t = minutesToClock(m);
+      html += `<option value="${t}"${t === selected ? " selected" : ""}>${t}</option>`;
+    }
+    return html;
+  };
+  const slotRow = (i) => `
+    <div class="slot">
+      <input type="date" name="alt_date_${i}" min="${today}" value="${escapeForEmail(values[`alt_date_${i}`] ?? (i === 1 ? r.date : ""))}" aria-label="Suggested date ${i}">
+      <select name="alt_time_${i}" aria-label="Suggested time ${i}">${timeOptions(values[`alt_time_${i}`] ?? "")}</select>
+    </div>`;
+  const hidden = (a) => `<input type="hidden" name="token" value="${escapeForEmail(r.respond_token)}"><input type="hidden" name="action" value="${a}">`;
+  return renderStaffPage("Reservation request", `
+    <h1>Reservation request</h1>
+    <p class="lead">for ${escapeForEmail(r.restaurant_name)}</p>
+    ${staffDetailsTable(r)}
+    ${error ? `<p class="error">${escapeForEmail(error)}</p>` : ""}
+    <form method="post" action="/reservations/respond">
+      ${hidden("confirm")}
+      <label>Message to the guest (optional)
+        <textarea name="message" maxlength="500" placeholder="Looking forward to seeing you!">${action === "confirm" ? escapeForEmail(values.message || "") : ""}</textarea>
+      </label>
+      <button class="green" type="submit">Confirm ${escapeForEmail(r.time)} for ${escapeForEmail(r.party_size)}</button>
+    </form>
+    <details ${action === "suggest" ? "open" : ""}>
+      <summary>Suggest another time</summary>
+      <form method="post" action="/reservations/respond">
+        ${hidden("suggest")}
+        <p>Up to three times you can do. The guest picks one, and it's confirmed straight away.</p>
+        ${slotRow(1)}${slotRow(2)}${slotRow(3)}
+        <label>Message to the guest (optional)
+          <textarea name="message" maxlength="500" placeholder="Fully booked at ${escapeForEmail(r.time)}, but these are free.">${action === "suggest" ? escapeForEmail(values.message || "") : ""}</textarea>
+        </label>
+        <button class="brandbtn" type="submit">Send suggestion</button>
+      </form>
+    </details>
+    <details ${action === "decline" ? "open" : ""}>
+      <summary>Decline</summary>
+      <form method="post" action="/reservations/respond">
+        ${hidden("decline")}
+        <label>Reason for the guest (optional)
+          <textarea name="message" maxlength="500" placeholder="Closed for a private event that evening.">${action === "decline" ? escapeForEmail(values.message || "") : ""}</textarea>
+        </label>
+        <label class="check"><input type="checkbox" name="no_reservations" value="1"> We don't take reservations at all (walk-in only). Guests won't be able to send us requests after this.</label>
+        <button class="red" type="submit">Decline request</button>
+      </form>
+    </details>
+    <p class="foot">Questions? Reply to the request email to reach ${escapeForEmail(r.customer_name || "the guest")} directly.</p>`);
 }
 
 const RESERVATION_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -1593,6 +2318,7 @@ const RESERVATION_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 app.post("/reservations", reservationsLimiter, requireAuth, async (req, res) => {
   const body = req.body || {};
   const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const restaurant_name = str(body.restaurant_name, 200);
   const restaurant_email = str(body.restaurant_email, 254);
   const restaurant_lang = str(body.restaurant_lang, 10) || null;
@@ -1601,6 +2327,10 @@ app.post("/reservations", reservationsLimiter, requireAuth, async (req, res) => 
   const contact_info = str(body.contact_info, 200);
   const notes = str(body.notes, 1000);
   const place_id = str(body.place_id, 300) || null;
+  // Browser's getTimezoneOffset() — see the time-handling comment above.
+  // Anything implausible falls back to UTC rather than being trusted.
+  const tzRaw = Number(body.tz_offset);
+  const tz_offset = Number.isInteger(tzRaw) && tzRaw >= -840 && tzRaw <= 840 ? tzRaw : 0;
 
   const missing = [];
   if (!restaurant_name) missing.push("restaurant_name");
@@ -1617,16 +2347,54 @@ app.post("/reservations", reservationsLimiter, requireAuth, async (req, res) => 
   // The app's own date/time inputs always send these shapes; anything else
   // (or an impossible date like 2026-02-30) would reach the restaurant as
   // garbage, so it's refused here rather than passed along.
-  const parsedDate = new Date(`${date}T00:00:00Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
+  if (!isRealDate(date)) {
     return res.status(400).json({ error: "Date must be a real date (YYYY-MM-DD)" });
   }
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+  if (!RESERVATION_TIME_RE.test(time)) {
     return res.status(400).json({ error: "Time must be in HH:MM format" });
   }
+  if (clockToMinutes(time) % SLOT_STEP_MIN !== 0) {
+    return res.status(400).json({ error: "Pick a time on the quarter hour, like 19:00, 19:15 or 19:30" });
+  }
+  // Same rules the app's time picker offers (see GET /reservation-slots),
+  // enforced here so nothing outside them can be sent anyway: inside the
+  // restaurant's hours, and at least a few minutes ahead of its local now.
+  const details = place_id ? await fetchPlaceDetails(place_id) : { periods: null, utc_offset: null };
+  const localNow = restaurantNow(details.utc_offset, tz_offset);
+  const { slots, hoursKnown } = availableSlots(details.periods, date, localNow, BOOKING_LEAD_GRACE_MIN);
+  if (!slots.includes(clockToMinutes(time))) {
+    const isPast = date < localNow.date || (date === localNow.date && clockToMinutes(time) < localNow.minutes + BOOKING_LEAD_GRACE_MIN);
+    if (isPast || !hoursKnown) {
+      return res.status(400).json({ error: "That time has already passed or is too soon, pick a later one" });
+    }
+    const ranges = openRangesLabel(details.periods, date);
+    return res.status(400).json({
+      error: ranges.length
+        ? `${restaurant_name} doesn't take bookings at ${time} on ${formatReservationDate(date)} (open ${ranges.join(", ")})`
+        : `${restaurant_name} is closed on ${formatReservationDate(date)}`,
+    });
+  }
+  // The restaurant's own offset wins over the guest's browser from here
+  // on — expiry and "upcoming vs past" then hold even for a guest booking
+  // a restaurant in another timezone.
+  const effectiveTzOffset = typeof details.utc_offset === "number" ? -details.utc_offset : tz_offset;
   const partySize = Number(body.party_size);
   if (!Number.isInteger(partySize) || partySize < 1 || partySize > 50) {
     return res.status(400).json({ error: "Party size must be a whole number from 1 to 50" });
+  }
+  // The exact same request twice (a double submit, or forgetting one was
+  // already sent) would email the restaurant twice for one table. A
+  // different time at the same place is allowed — the app warns about that
+  // one before sending instead (see reviewReservationRequest).
+  expireAndSave(reservations.filter(r => r.customer_email === req.user.email));
+  if (place_id && bookingInfo[place_id]?.declared_no_reservations) {
+    return res.status(409).json({ error: `${restaurant_name} told us they don't take reservations. Just walk in.` });
+  }
+  const duplicate = place_id && reservations.find(r =>
+    r.customer_email === req.user.email && r.place_id === place_id &&
+    r.date === date && r.time === time && ACTIVE_RESERVATION_STATUSES.has(r.status));
+  if (duplicate) {
+    return res.status(409).json({ error: `You already have a request at ${restaurant_name} for this exact time. Check Bookings.` });
   }
 
   const now = Date.now();
@@ -1636,8 +2404,17 @@ app.post("/reservations", reservationsLimiter, requireAuth, async (req, res) => 
     restaurant_name,
     restaurant_email,
     restaurant_lang,
+    // Display-only snapshot for the Bookings list (a photo and a Call
+    // button without re-fetching Place Details for every booking).
+    restaurant_phone: str(body.restaurant_phone, 40) || null,
+    restaurant_photo: str(body.restaurant_photo, 600) || null,
+    latitude: num(body.latitude),
+    longitude: num(body.longitude),
     date,
     time,
+    tz_offset: effectiveTzOffset,
+    // Bounds the restaurant's own "suggest another time" dropdown.
+    hours_window: weeklySlotWindow(details.periods),
     party_size: partySize,
     // From the session, never the body — the restaurant should see who
     // actually signed in, not whatever name the client chose to send.
@@ -1646,20 +2423,24 @@ app.post("/reservations", reservationsLimiter, requireAuth, async (req, res) => 
     contact_info,
     notes,
     status: "pending",
-    // Two separate random tokens rather than the reservation's own id —
-    // the id goes back to the browser (it's how the app polls status), so
-    // it can't also be what authorizes a confirm/decline.
-    confirm_token: crypto.randomBytes(24).toString("hex"),
-    decline_token: crypto.randomBytes(24).toString("hex"),
+    // A random token rather than the reservation's own id — the id goes
+    // back to the browser (it's how the app polls status), so it can't
+    // also be what authorizes the restaurant's answer.
+    respond_token: crypto.randomBytes(24).toString("hex"),
+    alternatives: [],
+    restaurant_message: null,
+    // True whenever something changed that the guest hasn't seen yet — the
+    // dot on the Bookings tab (see POST /reservations/seen).
+    guest_unseen: false,
     createdAt: now,
     updatedAt: now,
   };
 
   try {
-    await sendReservationEmail(reservation);
+    await sendReservationRequestEmail(reservation);
   } catch (error) {
     // Not saved — a "pending" request the restaurant never received would
-    // just sit there waiting on a click that can't happen.
+    // just sit there waiting on an answer that can't come.
     console.error("Reservation email failed:", error.response?.data || error.message);
     return res.status(502).json({ error: "Couldn't send the request to the restaurant, try again" });
   }
@@ -1673,61 +2454,155 @@ app.post("/reservations", reservationsLimiter, requireAuth, async (req, res) => 
 });
 
 // The signed-in user's own requests only — matched on the session's email,
-// same ownership-from-the-session rule as DELETE /reviews.
+// same ownership-from-the-session rule as DELETE /reviews. Also the Bookings
+// tab's source: "unseen" drives the dot on its nav button.
 app.get("/reservations", reservationsLimiter, requireAuth, (req, res) => {
-  const mine = reservations
-    .filter(r => r.customer_email === req.user.email)
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map(publicReservation);
-  res.json({ reservations: mine });
+  const all = reservations.filter(r => r.customer_email === req.user.email);
+  expireAndSave(all);
+  const mine = all.filter(r => {
+    const endedAt = reservationEndedAt(r);
+    return endedAt === null || Date.now() - endedAt < BOOKING_HISTORY_VISIBLE_MS;
+  });
+  res.json({
+    reservations: mine.sort((a, b) => b.createdAt - a.createdAt).map(publicReservation),
+    unseen: mine.filter(r => r.guest_unseen).length,
+  });
 });
 
-// Confirm/decline must be registered BEFORE GET /reservations/:id below —
-// Express matches in registration order, and :id would otherwise swallow
-// "confirm"/"decline" as an id, sending a restaurant's click into
-// requireAuth and a 401 instead of here. No auth on purpose: staff click
-// these from their inbox, not signed into the app; the unguessable token
-// is the authorization.
-function handleReservationResponse(tokenField, newStatus) {
+// Opening the Bookings tab counts as having seen every update in it.
+app.post("/reservations/seen", reservationsLimiter, requireAuth, (req, res) => {
+  let changed = false;
+  for (const r of reservations) {
+    if (r.customer_email === req.user.email && r.guest_unseen) {
+      r.guest_unseen = false;
+      changed = true;
+    }
+  }
+  if (changed) saveReservations(reservations);
+  res.json({ ok: true });
+});
+
+// Every public (token-authorized) GET below must stay registered BEFORE
+// GET /reservations/:id — Express matches in registration order, and :id
+// would otherwise swallow "respond"/"confirm"/"decline" as an id, sending
+// a restaurant's click into requireAuth and a 401. No auth on purpose:
+// staff open these from their inbox, not signed into the app; the
+// unguessable token is the authorization.
+function findByRespondToken(token) {
+  return typeof token === "string" && token ? reservations.find(r => r.respond_token === token) : null;
+}
+
+const linkNotFoundPage = () => renderReservationPage("Link not found", "This reservation link is invalid or no longer exists.", "error");
+
+app.get("/reservations/respond", reservationsLimiter, (req, res) => {
+  const reservation = findByRespondToken(req.query.token);
+  if (!reservation) return res.status(404).send(linkNotFoundPage());
+  if (applyExpiry(reservation)) saveReservations(reservations);
+  if (reservation.status !== "pending") return res.send(renderStaffStatusPage(reservation));
+  const action = ["confirm", "suggest", "decline"].includes(req.query.action) ? req.query.action : null;
+  res.send(renderRespondPage(reservation, { action }));
+});
+
+// Legacy per-button links from emails sent before the respond page
+// existed. They no longer change anything themselves (GET must be safe to
+// open — see renderRespondPage); they just forward to the respond page with
+// the matching section, minting a respond token on first use.
+function legacyResponseRedirect(tokenField, action) {
   return (req, res) => {
     const token = typeof req.query.token === "string" ? req.query.token : "";
     const reservation = token ? reservations.find(r => r[tokenField] === token) : null;
-    if (!reservation) {
-      return res.status(404).send(renderReservationPage(
-        "Link not found",
-        "This reservation link is invalid or no longer exists.",
-        "error"
-      ));
+    if (!reservation) return res.status(404).send(linkNotFoundPage());
+    if (!reservation.respond_token) {
+      reservation.respond_token = crypto.randomBytes(24).toString("hex");
+      saveReservations(reservations);
     }
-    // Already answered — show what it is without touching it, so a second
-    // click (or clicking the other button afterwards) can't flip it back
-    // and forth.
-    if (reservation.status !== "pending") {
-      return res.send(renderReservationPage(
-        `Already ${reservation.status}`,
-        `This reservation for ${reservation.party_size} on ${reservation.date} at ${reservation.time} was already marked as ${reservation.status}. Nothing was changed.`,
-        reservation.status
-      ));
-    }
-    reservation.status = newStatus;
-    reservation.updatedAt = Date.now();
-    saveReservations(reservations);
-    // Either click (decline included) proves someone at this address reads
-    // and answers these — the best evidence we'll ever have that it's the
-    // right one.
-    if (!isCustomersOwnEmail(reservation.restaurant_email, reservation)) {
-      rememberRestaurantEmail(reservation.place_id, reservation.restaurant_email, "confirmed");
-    }
-    res.send(renderReservationPage(
-      `Reservation ${newStatus}`,
-      `The reservation for ${reservation.customer_name || "your guest"}, party of ${reservation.party_size} on ${reservation.date} at ${reservation.time}, is now ${newStatus}. The guest will see this in the app.`,
-      newStatus
-    ));
+    res.redirect(302, `/reservations/respond?token=${reservation.respond_token}&action=${action}`);
   };
 }
+app.get("/reservations/confirm", reservationsLimiter, legacyResponseRedirect("confirm_token", "confirm"));
+app.get("/reservations/decline", reservationsLimiter, legacyResponseRedirect("decline_token", "decline"));
 
-app.get("/reservations/confirm", reservationsLimiter, handleReservationResponse("confirm_token", "confirmed"));
-app.get("/reservations/decline", reservationsLimiter, handleReservationResponse("decline_token", "declined"));
+// Parses the suggest form's up-to-three date/time rows. Returns
+// { alternatives } or { error } — a half-filled row is an error rather than
+// silently dropped, since staff clearly meant to offer something there.
+function parseSuggestedAlternatives(body, r) {
+  const alternatives = [];
+  for (let i = 1; i <= 3; i++) {
+    const date = typeof body[`alt_date_${i}`] === "string" ? body[`alt_date_${i}`].trim() : "";
+    const time = typeof body[`alt_time_${i}`] === "string" ? body[`alt_time_${i}`].trim() : "";
+    if (!date && !time) continue;
+    if (!date || !time) return { error: "Each suggestion needs both a date and a time." };
+    if (!isRealDate(date) || !RESERVATION_TIME_RE.test(time)) return { error: "One of the suggested dates or times isn't valid." };
+    // Quarter-hours like the guest's side, but deliberately NOT checked
+    // against Google's opening hours — the restaurant knows its own
+    // schedule (special openings, wrong Google data) better than we do.
+    if (clockToMinutes(time) % SLOT_STEP_MIN !== 0) return { error: "Suggested times need to be on the quarter hour." };
+    if (isPastSlot(date, time, r.tz_offset)) return { error: `${formatSlot(date, time)} has already passed.` };
+    if (date === r.date && time === r.time) return { error: "That's the time the guest asked for. Use Confirm instead." };
+    if (!alternatives.some(a => a.date === date && a.time === time)) alternatives.push({ date, time });
+  }
+  if (alternatives.length === 0) return { error: "Add at least one date and time you can do." };
+  alternatives.sort((a, b) => slotTimestamp(a.date, a.time, 0) - slotTimestamp(b.date, b.time, 0));
+  return { alternatives };
+}
+
+app.post("/reservations/respond", reservationsLimiter, express.urlencoded({ extended: false, limit: "20kb" }), (req, res) => {
+  const body = req.body || {};
+  const reservation = findByRespondToken(body.token);
+  if (!reservation) return res.status(404).send(linkNotFoundPage());
+  if (applyExpiry(reservation)) saveReservations(reservations);
+  // Already answered (by someone else at the restaurant, or this form
+  // resubmitted with the back button) — show where it stands, change
+  // nothing.
+  if (reservation.status !== "pending") return res.send(renderStaffStatusPage(reservation));
+
+  const action = body.action;
+  const message = typeof body.message === "string" ? body.message.trim().slice(0, 500) : "";
+  if (action === "suggest") {
+    const { alternatives, error } = parseSuggestedAlternatives(body, reservation);
+    if (error) return res.status(400).send(renderRespondPage(reservation, { action, error, values: body }));
+    reservation.status = "alternatives_offered";
+    reservation.alternatives = alternatives;
+  } else if (action === "confirm") {
+    reservation.status = "confirmed";
+  } else if (action === "decline") {
+    reservation.status = "declined";
+    // "We don't take reservations at all" — remembered for the place, so
+    // every later guest sees Walk-in only instead of sending another
+    // request that can only ever be declined (see decideBookingMode).
+    if (body.no_reservations === "1") {
+      reservation.no_reservations = true;
+      if (reservation.place_id) {
+        bookingInfo[reservation.place_id] = { ...bookingInfo[reservation.place_id], declared_no_reservations: true, declaredAt: Date.now() };
+        saveBookingInfo(bookingInfo);
+      }
+    }
+  } else {
+    return res.status(400).send(renderRespondPage(reservation, { error: "Pick one of the options below." }));
+  }
+  reservation.restaurant_message = message || null;
+  reservation.responded_at = Date.now();
+  reservation.updatedAt = reservation.responded_at;
+  reservation.guest_unseen = true;
+  saveReservations(reservations);
+  // Any answer (a decline included) proves someone at this address reads
+  // and answers these — the best evidence we'll ever have that it's right.
+  if (!isCustomersOwnEmail(reservation.restaurant_email, reservation)) {
+    rememberRestaurantEmail(reservation.place_id, reservation.restaurant_email, "confirmed");
+  }
+  // Not awaited — staff shouldn't wait on our outgoing mail to see their
+  // answer registered, and the guest sees the change in the app regardless.
+  sendGuestUpdateEmail(reservation);
+
+  const guest = reservation.customer_name || "The guest";
+  if (action === "confirm") {
+    res.send(renderReservationPage("Reservation confirmed", `${guest} has been told: ${reservation.party_size} on ${formatSlot(reservation.date, reservation.time)}.`, "confirmed"));
+  } else if (action === "decline") {
+    res.send(renderReservationPage("Request declined", `${guest} has been told you can't take this one.`, "declined"));
+  } else {
+    res.send(renderStaffStatusPage(reservation));
+  }
+});
 
 app.get("/reservations/:id", reservationsLimiter, requireAuth, (req, res) => {
   const reservation = reservations.find(r => r.id === req.params.id);
@@ -1736,7 +2611,126 @@ app.get("/reservations/:id", reservationsLimiter, requireAuth, (req, res) => {
   if (!reservation || reservation.customer_email !== req.user.email) {
     return res.status(404).json({ error: "Reservation not found" });
   }
+  if (applyExpiry(reservation)) saveReservations(reservations);
   res.json({ reservation: publicReservation(reservation) });
+});
+
+function findOwnReservation(req, res) {
+  const reservation = reservations.find(r => r.id === req.params.id);
+  if (!reservation || reservation.customer_email !== req.user.email) {
+    res.status(404).json({ error: "Reservation not found" });
+    return null;
+  }
+  if (applyExpiry(reservation)) saveReservations(reservations);
+  return reservation;
+}
+
+// Taking one of the restaurant's suggested times confirms it outright —
+// they already offered it, so there's no second round of asking. The
+// restaurant still gets an email saying which one was picked.
+app.post("/reservations/:id/accept", reservationsLimiter, requireAuth, async (req, res) => {
+  const reservation = findOwnReservation(req, res);
+  if (!reservation) return;
+  const { date, time } = req.body || {};
+  if (reservation.status !== "alternatives_offered") {
+    return res.status(409).json({ error: "These suggested times aren't open any more", reservation: publicReservation(reservation) });
+  }
+  const pick = (reservation.alternatives || []).find(a => a.date === date && a.time === time);
+  if (!pick) return res.status(400).json({ error: "That isn't one of the suggested times" });
+  if (isPastSlot(pick.date, pick.time, reservation.tz_offset)) {
+    return res.status(409).json({ error: "That time has already passed" });
+  }
+  reservation.original_date = reservation.date;
+  reservation.original_time = reservation.time;
+  reservation.date = pick.date;
+  reservation.time = pick.time;
+  reservation.status = "confirmed";
+  reservation.accepted_alternative = true;
+  reservation.guest_unseen = false;
+  reservation.updatedAt = Date.now();
+  saveReservations(reservations);
+  const restaurant_notified = await sendRestaurantUpdateEmail(reservation, "accepted");
+  res.json({ reservation: publicReservation(reservation), restaurant_notified });
+});
+
+// One endpoint for every way a guest backs out: withdrawing a request the
+// restaurant hasn't answered, turning down all suggested times, or
+// cancelling a confirmed table. What the restaurant is told differs (see
+// sendRestaurantUpdateEmail); what happens here doesn't.
+app.post("/reservations/:id/cancel", reservationsLimiter, requireAuth, async (req, res) => {
+  const reservation = findOwnReservation(req, res);
+  if (!reservation) return;
+  if (!ACTIVE_RESERVATION_STATUSES.has(reservation.status)) {
+    return res.status(409).json({ error: `This reservation is already ${reservation.status}`, reservation: publicReservation(reservation) });
+  }
+  if (reservation.status === "confirmed" && isPastSlot(reservation.date, reservation.time, reservation.tz_offset)) {
+    return res.status(409).json({ error: "This reservation has already taken place" });
+  }
+  const kind = reservation.status === "alternatives_offered" ? "declined_alternatives"
+    : reservation.status === "confirmed" ? "cancelled_booking"
+    : "withdrew_request";
+  reservation.cancel_kind = kind;
+  reservation.status = "cancelled";
+  reservation.cancelled_at = Date.now();
+  reservation.guest_unseen = false;
+  reservation.updatedAt = reservation.cancelled_at;
+  saveReservations(reservations);
+  const restaurant_notified = await sendRestaurantUpdateEmail(reservation, kind);
+  res.json({ reservation: publicReservation(reservation), restaurant_notified });
+});
+
+// A guest deleting one of their own ended bookings, right away rather than
+// waiting for the 90-day purge. Open ones have to be cancelled first — that
+// path tells the restaurant; silently deleting would leave them holding a
+// table (or a request) for someone who's gone.
+app.delete("/reservations/:id", reservationsLimiter, requireAuth, (req, res) => {
+  const reservation = findOwnReservation(req, res);
+  if (!reservation) return;
+  if (!isReservationClosed(reservation)) {
+    return res.status(409).json({ error: "Cancel this booking first, so the restaurant knows" });
+  }
+  reservations = reservations.filter(r => r !== reservation);
+  saveReservations(reservations);
+  res.json({ ok: true });
+});
+
+// On startup, then hourly — same unref'd-interval pattern as the rate
+// limiter's own cleanup, so it never keeps the process alive by itself.
+purgeOldReservations();
+setInterval(purgeOldReservations, 60 * 60 * 1000).unref();
+
+// What the Reserve modal's time dropdown offers for one date: quarter-hours
+// inside the restaurant's opening hours, from 15 minutes after its local
+// "now" on the day itself. When nothing's left that day (closed, or too
+// late), next_open_date lets the modal jump straight to a day that works.
+app.get("/reservation-slots", placesLimiter, requireAuth, async (req, res) => {
+  const placeId = typeof req.query.place_id === "string" ? req.query.place_id : "";
+  const date = typeof req.query.date === "string" ? req.query.date : "";
+  if (!placeId || !isRealDate(date)) return res.status(400).json({ error: "place_id and a valid date are required" });
+  const tzRaw = Number(req.query.tz_offset);
+  const guestTz = Number.isInteger(tzRaw) && tzRaw >= -840 && tzRaw <= 840 ? tzRaw : 0;
+
+  const details = await fetchPlaceDetails(placeId);
+  const now = restaurantNow(details.utc_offset, guestTz);
+  const { slots, hoursKnown } = availableSlots(details.periods, date, now, BOOKING_LEAD_MIN);
+
+  let nextOpenDate = null;
+  if (slots.length === 0 && hoursKnown) {
+    const start = date < now.date ? now.date : addDaysToDate(date, 1);
+    for (let i = 0; i < 30 && !nextOpenDate; i++) {
+      const candidate = addDaysToDate(start, i);
+      if (availableSlots(details.periods, candidate, now, BOOKING_LEAD_MIN).slots.length > 0) nextOpenDate = candidate;
+    }
+  }
+  res.json({
+    date,
+    today: now.date,
+    slots: slots.map(minutesToClock),
+    hours_known: hoursKnown,
+    open_ranges: openRangesLabel(details.periods, date),
+    closed_all_day: hoursKnown && (bookableSlotsOn(details.periods, date) || []).length === 0,
+    next_open_date: nextOpenDate,
+  });
 });
 
 // ── Restaurant email lookup ──
@@ -1921,7 +2915,71 @@ function findContactPageUrls(html, pageUrl) {
   return [...urls].slice(0, EMAIL_LOOKUP_MAX_EXTRA_PAGES);
 }
 
-async function findEmailOnWebsite(website) {
+// Online booking systems we recognize by the links a restaurant's own site
+// points to. Matched on real URLs only — a bare word isn't enough (every
+// Squarespace site ships "opentable" in its CSS class names whether it uses
+// OpenTable or not). "prefill" = verified in a real browser that the link
+// accepts date/party size/time and shows those tables (see
+// buildPrefilledBookingUrl); the rest open their booking page as-is.
+const BOOKING_PROVIDERS = [
+  {
+    id: "sevenrooms", name: "SevenRooms", prefill: true,
+    re: /^https?:\/\/(www\.)?sevenrooms\.com\/(explore|reservations)\/[^\s"'<>]+/i,
+    // Any SevenRooms venue link → that venue's search page, which is the
+    // one that reads ?date=&party_size=&start_time=.
+    normalize: (url) => {
+      const slug = url.match(/sevenrooms\.com\/explore\/([^/?#]+)/i)?.[1] || url.match(/sevenrooms\.com\/reservations\/([^/?#]+)/i)?.[1];
+      return slug ? `https://www.sevenrooms.com/explore/${slug}/reservations/create/search/` : url;
+    },
+  },
+  { id: "easytable", name: "EasyTable", re: /^https?:\/\/book\.easytable(booking)?\.com\/book\/[^\s"'<>]*/i },
+  { id: "tock", name: "Tock", re: /^https?:\/\/(www\.)?exploretock\.com\/[a-z0-9-]+/i },
+  { id: "opentable", name: "OpenTable", re: /^https?:\/\/(www\.)?opentable\.[a-z.]+\/(r\/|restref|restaurant\/profile|booking)[^\s"'<>]*/i },
+  { id: "thefork", name: "TheFork", re: /^https?:\/\/(www\.|widget\.)?(thefork|lafourchette)\.[a-z.]+\/[^\s"'<>]+/i },
+  { id: "dinnerbooking", name: "DinnerBooking", re: /^https?:\/\/[a-z0-9-]+\.b\.dinnerbooking\.com\/onlinebooking\/[^\s"'<>]*/i },
+  { id: "resdiary", name: "ResDiary", re: /^https?:\/\/(www\.|booking\.)?resdiary\.com\/[^\s"'<>]+/i },
+  { id: "quandoo", name: "Quandoo", re: /^https?:\/\/(www\.)?quandoo\.[a-z.]+\/(place|widget)[^\s"'<>]*/i },
+];
+
+function matchBookingProvider(rawUrl) {
+  let url = String(rawUrl || "").trim().replace(/&amp;|&#0?38;/g, "&");
+  if (url.startsWith("//")) url = `https:${url}`;
+  else if (/^www\./i.test(url)) url = `https://${url}`;
+  for (const provider of BOOKING_PROVIDERS) {
+    const m = url.match(provider.re);
+    if (m) return { provider: provider.id, provider_name: provider.name, prefill: !!provider.prefill, url: provider.normalize ? provider.normalize(m[0]) : m[0] };
+  }
+  return null;
+}
+
+// First recognized booking link in the page — prefill-capable systems win
+// when a site links more than one (Geranium still links its old
+// DinnerBooking page next to its current SevenRooms one).
+function findBookingLink(html) {
+  const found = [];
+  for (const m of html.matchAll(/(?:href|src|data-[a-z-]+)\s*=\s*["']([^"']+)["']/gi)) {
+    const hit = matchBookingProvider(m[1]);
+    if (hit) found.push(hit);
+  }
+  if (found.length === 0) return null;
+  return found.find(f => f.prefill) || found[0];
+}
+
+// "Walk-ins only" wording in the site's visible text, English or Danish.
+// Only ever used when there's no booking link — a site that links a
+// booking system clearly takes bookings, whatever else it says (e.g. "no
+// reservations for groups over 8").
+const WALK_IN_ONLY_RE = /\b(walk[- ]?ins? only|only walk[- ]?ins?|(we )?(do not|don't|dont) (take|accept) (table )?(reservations|bookings)|tager ikke (imod )?(bord)?(reservationer|bestillinger)|ingen (bord)?(reservationer|bestilling)|kun walk[- ]?in)\b/i;
+
+function mentionsWalkInOnly(html) {
+  const text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ");
+  return WALK_IN_ONLY_RE.test(text);
+}
+
+// One visit to the restaurant's site answers everything we want from it:
+// an email for the request flow, a link to its own booking system, and
+// whether it says it only takes walk-ins.
+async function scanRestaurantWebsite(website) {
   if (!isPublicHttpUrl(website)) return null;
   if (EMAIL_LOOKUP_SKIP_HOSTS.test(new URL(website).hostname)) return null;
   // One shared abort for every request in this lookup — whatever hasn't
@@ -1934,9 +2992,13 @@ async function findEmailOnWebsite(website) {
     if (!home) return null;
     const siteHost = new URL(home.url).hostname;
     const homeBest = pickBestEmail(extractEmailCandidates(home.html), siteHost);
+    let booking = findBookingLink(home.html);
+    let walkInOnly = mentionsWalkInOnly(home.html);
     // An on-domain address straight off the homepage is as good as it
-    // gets — no need to spend another second on subpages.
-    if (homeBest && homeBest.score >= 5) return { email: homeBest.email, found_on: home.url };
+    // gets — no need to spend another second on subpages. (Booking links
+    // live on the homepage's "Book a table" button on practically every
+    // site, so that's not a reason to keep crawling either.)
+    if (homeBest && homeBest.score >= 5) return { email: homeBest.email, found_on: home.url, booking, walk_in_only: walkInOnly };
 
     const pages = await Promise.all(
       findContactPageUrls(home.html, home.url).map(u => fetchHtml(u, controller.signal))
@@ -1949,54 +3011,94 @@ async function findEmailOnWebsite(website) {
         if (!foundOn.has(email)) foundOn.set(email, page.url);
       }
     }
+    for (const page of pages.filter(Boolean)) {
+      booking = booking || findBookingLink(page.html);
+      walkInOnly = walkInOnly || mentionsWalkInOnly(page.html);
+    }
     const best = pickBestEmail(all, siteHost);
-    return best ? { email: best.email, found_on: foundOn.get(best.email) } : null;
+    return { email: best?.email || null, found_on: best ? foundOn.get(best.email) : null, booking, walk_in_only: walkInOnly };
   } finally {
     clearTimeout(deadline);
   }
 }
 
-// Two people opening Reserve on the same place at once share one crawl.
-const emailLookupsInFlight = new Map(); // place_id -> Promise
+// Sites don't change their booking setup often — a week-old scan (hit or
+// miss) is reused rather than re-crawling on every card someone opens.
+const WEBSITE_SCAN_TTL_MS = EMAIL_LOOKUP_MISS_TTL_MS;
+// Two people opening the same place at once share one crawl.
+const websiteScansInFlight = new Map(); // place_id -> Promise
+
+async function getWebsiteScan(placeId, website) {
+  const cached = bookingInfo[placeId]?.website_scan;
+  if (cached && Date.now() - cached.checkedAt < WEBSITE_SCAN_TTL_MS) return cached;
+  if (!websiteScansInFlight.has(placeId)) {
+    const scan = (async () => {
+      let found = null;
+      try {
+        found = website ? await scanRestaurantWebsite(website) : null;
+      } catch (error) {
+        console.error(`Website scan failed for ${placeId}:`, error.message);
+      }
+      const record = {
+        email: found?.email || null,
+        found_on: found?.found_on || null,
+        booking: found?.booking || null,
+        walk_in_only: !!found?.walk_in_only,
+        checkedAt: Date.now(),
+      };
+      console.log(`Website scan for ${placeId} (${website || "no website"}): email ${record.email || "-"}, booking ${record.booking?.provider_name || "-"}${record.walk_in_only ? ", says walk-ins only" : ""}`);
+      bookingInfo[placeId] = { ...bookingInfo[placeId], website_scan: record };
+      saveBookingInfo(bookingInfo);
+      if (record.email) rememberRestaurantEmail(placeId, record.email, "website");
+      return record;
+    })().finally(() => websiteScansInFlight.delete(placeId));
+    websiteScansInFlight.set(placeId, scan);
+  }
+  return websiteScansInFlight.get(placeId);
+}
 
 // Pre-fill for the Reserve modal. Order: anything already known for this
 // place (typed by an earlier user, or proven by a restaurant's click) →
-// a recent "nothing found" → a live website lookup. Never an error for
-// "couldn't find one": { email: null } just leaves the field for the user.
+// the restaurant's own website. Never an error for "couldn't find one":
+// { email: null } just leaves the field for the user.
 app.get("/restaurant-email", placesLimiter, requireAuth, async (req, res) => {
   const placeId = typeof req.query.place_id === "string" ? req.query.place_id : "";
   if (!placeId) return res.status(400).json({ error: "place_id is required" });
 
   const known = restaurantEmails[placeId];
   if (known?.email) return res.json({ email: known.email, source: known.source });
-  if (known && Date.now() - known.updatedAt < EMAIL_LOOKUP_MISS_TTL_MS) {
-    return res.json({ email: null, source: null });
-  }
 
-  if (!emailLookupsInFlight.has(placeId)) {
-    const lookup = (async () => {
-      const { website } = await fetchPlaceDetails(placeId);
-      if (!website) return null;
-      const found = await findEmailOnWebsite(website);
-      console.log(`Restaurant email lookup for ${placeId} (${website}): ${found ? `${found.email} on ${found.found_on}` : "nothing found"}`);
-      if (found) {
-        rememberRestaurantEmail(placeId, found.email, "website");
-      } else {
-        restaurantEmails[placeId] = { email: null, source: "website", updatedAt: Date.now() };
-        saveRestaurantEmails(restaurantEmails);
-      }
-      return found;
-    })().finally(() => emailLookupsInFlight.delete(placeId));
-    emailLookupsInFlight.set(placeId, lookup);
-  }
+  const { website } = await fetchPlaceDetails(placeId);
+  const scan = website ? await getWebsiteScan(placeId, website) : null;
+  res.json(scan?.email ? { email: scan.email, source: "website", found_on: scan.found_on } : { email: null, source: null });
+});
 
-  try {
-    const found = await emailLookupsInFlight.get(placeId);
-    res.json(found ? { email: found.email, source: "website", found_on: found.found_on } : { email: null, source: null });
-  } catch (error) {
-    console.error(`Restaurant email lookup failed for ${placeId}:`, error.message);
-    res.json({ email: null, source: null });
-  }
+// "How do you book here?" — decides which button a restaurant's card gets.
+// When signals disagree, the most direct source wins: the restaurant's own
+// answer, then its own website, then Google's listing.
+//   online   — its site links a booking system: book there (real free
+//              tables, instant confirmation), email request as a fallback
+//   walk_in  — it doesn't take reservations (reason says who told us)
+//   request  — our email request flow; maybe_no_reservations flags cafés/
+//              bakeries/takeaways Google has no answer for
+function decideBookingMode(details, info, scan) {
+  if (info?.declared_no_reservations) return { mode: "walk_in", reason: "restaurant" };
+  // A Google "website" that is itself a booking page (some places list
+  // their OpenTable/TheFork page there) counts the same as a linked one.
+  const booking = scan?.booking || matchBookingProvider(details.website);
+  if (booking) return { mode: "online", ...booking };
+  if (scan?.walk_in_only) return { mode: "walk_in", reason: "website" };
+  if (details.reservable === false) return { mode: "walk_in", reason: "google" };
+  const casual = ["cafe", "bakery", "meal_takeaway"].some(t => (details.types || []).includes(t));
+  return { mode: "request", maybe_no_reservations: details.reservable !== true && casual };
+}
+
+app.get("/booking-options", bookingOptionsLimiter, requireAuth, async (req, res) => {
+  const placeId = typeof req.query.place_id === "string" ? req.query.place_id : "";
+  if (!placeId) return res.status(400).json({ error: "place_id is required" });
+  const details = await fetchPlaceDetails(placeId);
+  const scan = details.website ? await getWebsiteScan(placeId, details.website) : null;
+  res.json(decideBookingMode(details, bookingInfo[placeId], scan));
 });
 
 // Client IDs aren't secret (they're meant to end up in frontend JS,

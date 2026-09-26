@@ -48,6 +48,89 @@
        .save-picker-new-btn's dashed/transparent one (it comes later in
        style.css at equal specificity), so the primary action read as a
        disabled ghost button. The id bumps specificity past both. */
+    .reservation-confirm-lead {
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--ink-3);
+      margin: 0 0 2px;
+    }
+
+    .reservation-confirm-recipient {
+      font-family: var(--sans);
+      font-size: 17px;
+      font-weight: 500;
+      color: var(--ink);
+      word-break: break-all;
+      margin: 0 0 10px;
+    }
+
+    .reservation-confirm-self {
+      font-family: var(--sans);
+      font-size: 12px;
+      color: #8a5a00;
+      background: #fbf1dc;
+      border: 0.5px solid #d9a441;
+      border-radius: 8px;
+      padding: 6px 10px;
+      margin: -4px 0 10px;
+    }
+
+    body.dark .reservation-confirm-self {
+      color: #E8C06A;
+      background: rgba(232, 192, 106, 0.1);
+      border-color: #8a6a2a;
+    }
+
+    .reservation-confirm-summary {
+      background: var(--paper-2);
+      border: 0.5px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--ink);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin: 0 0 10px;
+    }
+
+    .reservation-confirm-summary div {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .reservation-confirm-summary i {
+      color: var(--ink-3);
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+
+    .reservation-confirm-note {
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--ink-3);
+      margin: 0 0 12px;
+    }
+
+    .reservation-back-btn {
+      display: block;
+      width: 100%;
+      margin-top: 6px;
+      background: none;
+      border: none;
+      padding: 8px;
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--ink-3);
+      cursor: pointer;
+    }
+
+    .reservation-back-btn:hover {
+      color: var(--ember);
+    }
+
     #reservationSubmitBtn {
       background: var(--ink);
       border: 0.5px solid var(--ink);
@@ -94,6 +177,178 @@
 
     body.dark .reservation-field {
       color-scheme: dark;
+    }
+
+    /* ── Merged photo stack (see renderPhotoSection) — Google's photos plus
+       guest photos from reviews, filterable by category. Hidden with the
+       rest of the card's extras until the card is expanded, like
+       .photo-gallery itself. */
+    .photo-filter-chips {
+      display: none;
+      gap: 6px;
+      overflow-x: auto;
+      margin-top: 10px;
+      scrollbar-width: none;
+    }
+
+    .card.expanded .photo-filter-chips {
+      display: flex;
+    }
+
+    .photo-filter-chip {
+      flex-shrink: 0;
+      background: none;
+      border: 0.5px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-family: var(--sans);
+      font-size: 11px;
+      color: var(--ink-2);
+      cursor: pointer;
+    }
+
+    .photo-filter-chip.active {
+      background: var(--ink);
+      border-color: var(--ink);
+      color: var(--paper);
+    }
+
+    .photo-filter-chip span {
+      opacity: 0.6;
+      margin-left: 3px;
+    }
+
+    .gallery-item {
+      position: relative;
+      flex-shrink: 0;
+      display: block;
+    }
+
+    .gallery-guest-badge {
+      position: absolute;
+      bottom: 4px;
+      left: 4px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+
+    .gallery-empty {
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--ink-3);
+      padding: 8px 0;
+    }
+
+    .lightbox-caption {
+      position: absolute;
+      left: 50%;
+      bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+      margin: 0;
+      max-width: 90vw;
+      padding: 5px 12px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.5);
+      color: #fff;
+      font-family: var(--sans);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .lightbox-caption:empty {
+      display: none;
+    }
+
+    /* Review editor: a category picker under each newly picked photo. */
+    .review-editor-photo-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: 76px;
+    }
+
+    .review-editor-photo-item .review-editor-photo-thumb {
+      width: 76px;
+      height: 76px;
+    }
+
+    .review-editor-photo-category {
+      width: 100%;
+      font-family: var(--sans);
+      font-size: 10px;
+      color: var(--ink);
+      background: var(--paper-2);
+      border: 0.5px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 2px;
+    }
+
+    .review-editor-photo-label {
+      font-family: var(--sans);
+      font-size: 10px;
+      color: var(--ink-3);
+      text-align: center;
+    }
+
+    /* Card booking buttons (see bookingActionHtml). display: contents keeps
+       them flowing in the card's action row as if they sat there directly. */
+    .booking-action {
+      display: contents;
+    }
+
+    /* .reservation-field-label sets display: flex, which beats the browser's
+       own [hidden] rule — without this, online mode's hidden rows stay put. */
+    .reservation-field-label[hidden] {
+      display: none;
+    }
+
+    .card-map-btn.book-online {
+      border-color: var(--ember-light);
+      color: var(--ember);
+    }
+
+    .card-map-btn.walk-in {
+      cursor: default;
+      color: var(--ink-3);
+      border-style: dashed;
+    }
+
+    .reservation-online-note {
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--ink-2);
+      background: var(--paper-2);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin: -6px 0 12px;
+    }
+
+    .reservation-slots-hint {
+      font-family: var(--sans);
+      font-size: 11px;
+      color: var(--ink-3);
+      margin: -4px 0 0;
+      min-height: 14px;
+    }
+
+    .reservation-slots-hint button {
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      color: var(--ember);
+      text-decoration: underline;
+      cursor: pointer;
     }
 
     .reservation-email-hint {
@@ -148,6 +403,251 @@
       margin: 0 0 8px;
     }
 
+    /* The card badge links to Bookings (see reservationBadgeHtml). */
+    button.reservation-status-line {
+      cursor: pointer;
+      font-family: var(--sans);
+    }
+
+    .reservation-status-line.alternatives_offered {
+      color: #8B3A1F;
+      border-color: #C4602E;
+      background: #fbeee6;
+    }
+
+    .reservation-status-line.expired,
+    .reservation-status-line.cancelled {
+      color: var(--ink-3);
+      border-color: var(--border);
+      background: var(--paper-2);
+    }
+
+    body.dark .reservation-status-line.alternatives_offered {
+      color: #E07A3E;
+      border-color: #7a4020;
+      background: rgba(224, 122, 62, 0.1);
+    }
+
+    /* ── Bottom-nav update dot + Bookings page ── */
+    .bottom-nav-icon-wrap {
+      position: relative;
+      display: inline-flex;
+    }
+
+    .bottom-nav-btn .bottom-nav-dot {
+      position: absolute;
+      top: -1px;
+      right: -4px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--ember);
+      border: 1.5px solid var(--paper-2);
+    }
+
+    .bookings-section-label {
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin: 10px 0 0;
+    }
+
+    .bookings-section-label:first-child {
+      margin-top: 0;
+    }
+
+    .booking-card {
+      background: var(--card-bg);
+      border: 0.5px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .booking-card.clickable {
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    .booking-card.clickable:hover {
+      border-color: var(--ember-light);
+    }
+
+    .booking-card {
+      position: relative;
+    }
+
+    .booking-remove {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      z-index: 1;
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      border: 0.5px solid var(--border);
+      background: var(--card-bg);
+      color: var(--ink-3);
+      font-size: 10px;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .booking-remove:hover {
+      color: #b3261e;
+      border-color: #d9867f;
+    }
+
+    body.dark .booking-remove:hover {
+      color: #ef7a7a;
+    }
+
+    .booking-card.needs-answer {
+      border-color: var(--ember-light);
+    }
+
+    .booking-card.closed {
+      opacity: 0.75;
+    }
+
+    .booking-top {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .booking-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .booking-name {
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .booking-when {
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--ink-2);
+    }
+
+    .booking-when s {
+      color: var(--ink-3);
+    }
+
+    .booking-status {
+      font-family: var(--sans);
+      font-size: 12px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .booking-status.pending { color: #8a5a00; }
+    .booking-status.confirmed { color: #2D6A27; }
+    .booking-status.alternatives_offered { color: #8B3A1F; }
+    .booking-status.declined { color: #b3261e; }
+    .booking-status.cancelled,
+    .booking-status.expired { color: var(--ink-3); }
+    body.dark .booking-status.pending { color: #E8C06A; }
+    body.dark .booking-status.confirmed { color: #5A9E54; }
+    body.dark .booking-status.alternatives_offered { color: #E07A3E; }
+    body.dark .booking-status.declined { color: #ef7a7a; }
+
+    .booking-new {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #fff;
+      background: var(--ember);
+      border-radius: 999px;
+      padding: 1px 6px;
+      margin-left: 6px;
+      vertical-align: 1px;
+    }
+
+    .booking-message {
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--ink);
+      border-left: 3px solid var(--ember-light);
+      background: var(--paper-2);
+      border-radius: 0 8px 8px 0;
+      padding: 6px 10px;
+    }
+
+    .booking-message span {
+      display: block;
+      font-size: 11px;
+      color: var(--ink-3);
+      margin-top: 2px;
+    }
+
+    .booking-nudge {
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--ink-3);
+    }
+
+    .booking-alternatives {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .booking-alt-btn {
+      background: var(--ink);
+      color: var(--paper);
+      border: none;
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .booking-alt-btn:hover {
+      background: var(--ember);
+      color: #fff;
+    }
+
+    .booking-alt-btn.no-thanks {
+      background: none;
+      color: var(--ink-3);
+      border: 0.5px solid var(--border);
+    }
+
+    .booking-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .booking-actions .card-map-btn.danger {
+      color: #b3261e;
+    }
+
+    body.dark .booking-actions .card-map-btn.danger {
+      color: #ef7a7a;
+    }
+
     .reservation-status-line.pending {
       color: #8a5a00;
       border-color: #d9a441;
@@ -182,6 +682,55 @@
       color: #ef7a7a;
       border-color: #8a3a35;
       background: rgba(239, 122, 122, 0.1);
+    }
+
+    /* Community review sort + "Helpful" votes */
+    .community-review-sort {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .community-review-sort-btn,
+    .community-review-helpful-btn {
+      background: none;
+      border: 0.5px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ink-3);
+      cursor: pointer;
+    }
+
+    .community-review-sort-btn.active,
+    .community-review-helpful-btn.active {
+      color: var(--ember);
+      border-color: var(--ember);
+    }
+
+    .community-review-helpful {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .community-review-helpful-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .community-review-helpful-count {
+      font-family: var(--sans);
+      font-size: 11px;
+      color: var(--ink-3);
+    }
+
+    p.community-review-helpful-count {
+      margin-top: 8px;
     }
   </style>
   <!-- ?hl=en pins the rendered button's own text (e.g. "Sign in with
@@ -406,6 +955,17 @@
     <div class="saved-view-list" id="savedViewList"></div>
   </div>
 
+  <!-- Bookings page (see showBookingsView) — every reservation request in
+       one place, read from the server (GET /reservations) rather than
+       scattered across restaurant cards, so it's complete on any device.
+       Same full-page overlay as #savedView. -->
+  <div class="saved-view bookings-view" id="bookingsView" hidden>
+    <div class="saved-view-header">
+      <p class="saved-view-title">Bookings</p>
+    </div>
+    <div class="saved-view-list" id="bookingsList"></div>
+  </div>
+
   <!-- Category picker (see openSaveCategoryPicker) — shown when saving a
        restaurant that isn't already saved, so "save" always means "save
        into something" (Liked, or one of your own categories) instead of a
@@ -454,9 +1014,9 @@
         <label class="review-editor-photo-add" for="reviewEditorPhotoInput">
           <i class="ti ti-camera-plus"></i> Add photos
         </label>
-        <input type="file" id="reviewEditorPhotoInput" accept="image/*" multiple hidden onchange="handleReviewPhotoSelect(event)">
+        <input type="file" id="reviewEditorPhotoInput" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="handleReviewPhotoSelect(event)">
       </div>
-      <button class="save-picker-new-btn saved-edit-save" onclick="submitReview()">Post review</button>
+      <button class="save-picker-new-btn saved-edit-save" id="reviewEditorSubmitBtn" onclick="submitReview()">Post review</button>
       <button class="save-picker-new-btn review-editor-delete" id="reviewEditorDeleteBtn" onclick="deleteMyReview()" hidden>Delete my review</button>
     </div>
   </div>
@@ -471,8 +1031,14 @@
         <i class="ti ti-x"></i>
       </button>
       <p class="save-picker-title" id="reservationTitle">Request a table</p>
+      <p class="reservation-online-note" id="reservationModeNote" hidden></p>
+      <!-- Two steps in one sheet: fill in the form, then a confirm screen
+           that spells out exactly who is about to be emailed (see
+           reviewReservationRequest). A real email to a real restaurant
+           can't be unsent, so it never goes out on a single tap. -->
+      <div id="reservationFormStep">
       <div class="reservation-form">
-        <label class="reservation-field-label">Restaurant email
+        <label class="reservation-field-label" id="reservationEmailRow">Restaurant email
           <input type="email" class="reservation-field" id="reservationRestaurantEmail" placeholder="bookings@restaurant.com" autocomplete="off">
           <span class="reservation-email-hint" id="reservationEmailHint"></span>
         </label>
@@ -481,21 +1047,32 @@
             <input type="date" class="reservation-field" id="reservationDate">
           </label>
           <label class="reservation-field-label">Time
-            <input type="time" class="reservation-field" id="reservationTime">
+            <select class="reservation-field" id="reservationTime"></select>
           </label>
           <label class="reservation-field-label">Guests
             <input type="number" class="reservation-field" id="reservationPartySize" min="1" max="50" value="2">
           </label>
         </div>
-        <label class="reservation-field-label">How can they reach you?
+        <p class="reservation-slots-hint" id="reservationSlotsHint"></p>
+        <label class="reservation-field-label" id="reservationContactRow">How can they reach you?
           <input type="text" class="reservation-field" id="reservationContact" placeholder="Phone or email">
         </label>
-        <label class="reservation-field-label">Notes (optional)
+        <label class="reservation-field-label" id="reservationNotesRow">Notes (optional)
           <textarea class="reservation-field" id="reservationNotes" rows="2" maxlength="1000" placeholder="Allergies, a window table, a birthday…"></textarea>
         </label>
       </div>
+      </div>
+      <div id="reservationConfirmStep" hidden>
+        <p class="reservation-confirm-lead">This sends a real email to</p>
+        <p class="reservation-confirm-recipient" id="reservationConfirmRecipient"></p>
+        <p class="reservation-confirm-self" id="reservationConfirmSelf" hidden>That's your own address, so no restaurant will be contacted.</p>
+        <p class="reservation-confirm-self" id="reservationConfirmDuplicate" hidden></p>
+        <div class="reservation-confirm-summary" id="reservationConfirmSummary"></div>
+        <p class="reservation-confirm-note">They confirm or decline straight from the email, and you'll see their answer on this restaurant's card.</p>
+      </div>
       <p class="reservation-modal-status" id="reservationModalStatus"></p>
-      <button class="save-picker-new-btn saved-edit-save" id="reservationSubmitBtn" onclick="submitReservationRequest()">Send request</button>
+      <button class="save-picker-new-btn saved-edit-save" id="reservationSubmitBtn" onclick="reviewReservationRequest()">Review request</button>
+      <button class="reservation-back-btn" id="reservationBackBtn" onclick="showReservationStep('form')" hidden>Go back and edit</button>
     </div>
   </div>
 
@@ -552,7 +1129,7 @@
     </div>
   </div>
 
-  <!-- Prototype (see updateMapNavIcon/deepDiveRestaurant comments): a
+  <!-- Prototype (see deepDiveRestaurant's comments): a
        browse-mode restaurant deep dive now slides up as a sheet over the
        still-visible map, Google Maps/Airbnb-style, instead of navigating
        away to a separate list screen — so there's no List/Map toggle
@@ -607,12 +1184,18 @@
       <span>Home</span>
     </button>
     <button class="bottom-nav-btn" id="navMap" onclick="browseNearbyOnMap()" title="Map">
-      <i class="ti ti-map-2 map-nav-icon"></i>
-      <span class="map-nav-label">Map</span>
+      <i class="ti ti-map-2"></i>
+      <span>Map</span>
     </button>
     <button class="bottom-nav-btn" id="navSaved" onclick="openSavedSection()" title="Saved">
       <i class="ti ti-heart"></i>
       <span>Saved</span>
+    </button>
+    <!-- Placement is provisional — Bookings may move (into Saved, or the
+         menu) once it's clearer how often people actually use it. -->
+    <button class="bottom-nav-btn" id="navBookings" onclick="showBookingsView()" title="Bookings">
+      <span class="bottom-nav-icon-wrap"><i class="ti ti-calendar-event"></i><span class="bottom-nav-dot" id="bookingsNavDot" hidden></span></span>
+      <span>Bookings</span>
     </button>
     <button class="bottom-nav-btn" id="navMenu" onclick="toggleMenu()" title="Menu">
       <i class="ti ti-menu-2"></i>
@@ -624,6 +1207,7 @@
     <button class="lightbox-close" onclick="closeLightbox()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
     <button class="lightbox-nav lightbox-prev" onclick="event.stopPropagation(); lightboxStep(-1)" title="Previous" aria-label="Previous photo"><i class="ti ti-chevron-left"></i></button>
     <img class="lightbox-img" id="lightboxImg" src="" alt="">
+    <p class="lightbox-caption" id="lightboxCaption"></p>
     <button class="lightbox-nav lightbox-next" onclick="event.stopPropagation(); lightboxStep(1)" title="Next" aria-label="Next photo"><i class="ti ti-chevron-right"></i></button>
   </div>
 
@@ -1164,6 +1748,7 @@
       loadCommunityReviews(index);
       attachAskVoiceInput(index);
       refreshReservationStatus(index);
+      loadBookingOptions(index);
       // Full, not peek — tapping "View details" is a deliberate request to
       // actually see the restaurant, not a glance, so it should open at the
       // size that's actually the point of opening it at all. Dragging or
@@ -1397,6 +1982,12 @@
       results.forEach((r, index) => {
         resultsBox.innerHTML += buildCardHtml(r, index);
       });
+      // Every card shows how that place actually takes bookings right away
+      // (Book online / Reserve / Walk-in only) instead of only after it's
+      // expanded — a collapsed card saying "Reserve" for a place that books
+      // through EasyTable reads as the app not knowing. Cached per place on
+      // both ends, so re-renders (unit toggle, unsave) cost nothing.
+      results.forEach((r, index) => loadBookingOptions(index));
     }
 
     // Pulled out of renderResults so a single restaurant shown in the
@@ -1478,8 +2069,10 @@
       }
       // Gated on place_id: it's the key the stored reservation record (and
       // so the status badge/polling) hangs off, same as askBoxHtml below.
+      // Starts as plain Reserve and is swapped for the place's real booking
+      // route once known (see loadBookingOptions).
       if (r.place_id) {
-        actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); openReservationModal(${index})"><i class="ti ti-calendar-event"></i> Reserve</button>`;
+        actionsHtml += `<span class="booking-action">${bookingActionHtml(r, index)}</span>`;
       }
       if (r.phone) {
         actionsHtml += `<a class="card-map-btn" href="tel:${escapeHtml(r.phone)}" onclick="event.stopPropagation()"><i class="ti ti-phone"></i> Call</a>`;
@@ -1524,8 +2117,13 @@
       // actually expanded (see toggleCardExpand) — Google bills each photo
       // separately, so this container starts empty rather than eagerly
       // loading photos for cards nobody opens.
+      // Also present whenever the place could have guest photos (place_id
+      // — reviews are keyed by it), since those arrive with the reviews
+      // after the card opens (see renderPhotoSection).
       const hasExtraPhotos = r.photos && r.photos.filter(p => p !== r.photo_reference).length > 0;
-      const galleryHtml = hasExtraPhotos ? `<div class="photo-gallery" id="photoGallery-${index}"></div>` : "";
+      const galleryHtml = (hasExtraPhotos || r.place_id)
+        ? `<div class="photo-filter-chips" id="photoFilters-${index}"></div><div class="photo-gallery" id="photoGallery-${index}"></div>`
+        : "";
 
       // Real, other-users-visible reviews (see loadCommunityReviews) —
       // fetched lazily on expand, same reasoning as galleryHtml above: no
@@ -1615,6 +2213,7 @@
         loadCommunityReviews(index);
         attachAskVoiceInput(index);
         refreshReservationStatus(index);
+        loadBookingOptions(index);
         // Expanding reveals photos/reviews/ask-box below the card, which can
         // land off-screen with no hint there's more — 'nearest' only moves
         // the page if the card isn't already fully visible, so a tap near
@@ -1628,17 +2227,102 @@
       const galleryEl = document.getElementById(`photoGallery-${index}`);
       if (!r || !galleryEl || galleryEl.dataset.loaded) return;
       galleryEl.dataset.loaded = "true";
+      renderPhotoSection(index);
+    }
 
-      // Keeps each thumbnail's position in r.photos (not the filtered/sliced
-      // list) so openLightboxFromCard can look the same ref back up there —
-      // avoids embedding the raw photo_reference string in an onclick attribute.
-      const extra = (r.photos || [])
-        .map((ref, pos) => ({ ref, pos }))
-        .filter(p => p.ref !== r.photo_reference)
-        .slice(0, 4);
-      galleryEl.innerHTML = extra.map(p =>
-        `<img class="gallery-photo" src="/photo?ref=${encodeURIComponent(p.ref)}" alt="" loading="lazy" onerror="this.remove()" onclick="event.stopPropagation(); openLightboxFromCard(${index}, ${p.pos})">`
-      ).join("");
+    // --- One photo stack per restaurant: Google's photos, then photos
+    // guests attached to their reviews (see GET /reviews' "photos"). Guest
+    // photos carry a category, so the stack can be filtered; Google's
+    // can't (it doesn't label them, and its terms don't allow storing our
+    // own labels for its content), so those only appear under All.
+    const PHOTO_FILTERS = [
+      { id: 'all', label: 'All' },
+      { id: 'food', label: 'Food' },
+      { id: 'atmosphere', label: 'Atmosphere' },
+      { id: 'place', label: 'Place' },
+      { id: 'other', label: 'Other' },
+    ];
+    const PHOTO_CATEGORY_LABELS = { food: 'Food', atmosphere: 'Atmosphere', place: 'Place' };
+    const MAX_GALLERY_THUMBS = 12;
+
+    function buildPhotoItems(r) {
+      const items = buildPhotoList(r).map(ref => ({
+        src: `/photo?ref=${encodeURIComponent(ref)}`, source: 'google', category: null, hero: ref === r.photo_reference,
+      }));
+      (r._guestPhotos || []).forEach(p => items.push({
+        src: p.url, source: 'guest', category: p.category || null, by: p.userName || null,
+      }));
+      return items;
+    }
+
+    function filterPhotoItems(items, filter) {
+      if (filter === 'all') return items;
+      if (filter === 'other') return items.filter(it => it.source === 'guest' && !it.category);
+      return items.filter(it => it.source === 'guest' && it.category === filter);
+    }
+
+    // The card's chips + thumbnail strip. Re-rendered when guest photos
+    // arrive (they come with the reviews) and when a chip is tapped.
+    function renderPhotoSection(index) {
+      const r = currentResults[index];
+      const galleryEl = document.getElementById(`photoGallery-${index}`);
+      const chipsEl = document.getElementById(`photoFilters-${index}`);
+      if (!r || !galleryEl) return;
+      const items = buildPhotoItems(r);
+      const filter = r._photoFilter || 'all';
+      const hasGuest = items.some(it => it.source === 'guest');
+      if (chipsEl) {
+        // Chips only mean something once guests have added photos — with
+        // Google's alone, every category would be empty.
+        chipsEl.innerHTML = !hasGuest ? '' : PHOTO_FILTERS
+          .map(f => ({ ...f, count: filterPhotoItems(items, f.id).length }))
+          .filter(f => f.id === 'all' || f.count > 0)
+          .map(f => `<button type="button" class="photo-filter-chip ${f.id === filter ? 'active' : ''}" onclick="event.stopPropagation(); setPhotoFilter(${index}, '${f.id}')">${f.label}<span>${f.count}</span></button>`)
+          .join('');
+      }
+      const list = filterPhotoItems(items, filter);
+      // Under All the hero is already the big photo at the top of the card,
+      // so the strip starts after it; a category shows everything in it.
+      const offset = filter === 'all' && list[0]?.hero ? 1 : 0;
+      const thumbs = list.slice(offset, offset + MAX_GALLERY_THUMBS);
+      galleryEl.innerHTML = thumbs.length === 0 && filter !== 'all'
+        ? `<p class="gallery-empty">No ${escapeHtml((PHOTO_FILTERS.find(f => f.id === filter) || {}).label || '').toLowerCase()} photos yet.</p>`
+        : thumbs.map((it, i) => `
+          <span class="gallery-item" title="${it.source === 'guest' ? `Photo by ${escapeHtml(it.by || 'a guest')}` : 'From Google'}">
+            <img class="gallery-photo" src="${escapeHtml(it.src)}" alt="" loading="lazy" onerror="this.parentElement.remove()" onclick="event.stopPropagation(); openPhotoViewer(${index}, ${i + offset})">
+            ${it.source === 'guest' ? '<span class="gallery-guest-badge"><i class="ti ti-user"></i></span>' : ''}
+          </span>`).join('');
+    }
+
+    function setPhotoFilter(index, filter) {
+      const r = currentResults[index];
+      if (!r) return;
+      r._photoFilter = filter;
+      renderPhotoSection(index);
+    }
+
+    // Opens the viewer on the card's current filter, at one position in it.
+    function openPhotoViewer(index, position) {
+      const r = currentResults[index];
+      if (!r) return;
+      const list = filterPhotoItems(buildPhotoItems(r), r._photoFilter || 'all');
+      if (list.length === 0) return;
+      lightboxPhotos = list;
+      lightboxIndex = Math.min(Math.max(0, position), list.length - 1);
+      renderLightboxImage();
+      document.getElementById('lightbox').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    // A thumbnail inside someone's review — opens the whole stack (All) at
+    // that exact photo, so swiping carries on through the rest.
+    function openGuestPhoto(index, url) {
+      const r = currentResults[index];
+      if (!r) return;
+      r._photoFilter = 'all';
+      renderPhotoSection(index);
+      const pos = buildPhotoItems(r).findIndex(it => it.src === url);
+      openPhotoViewer(index, pos);
     }
 
     // --- Community reviews (see /reviews on the server) — real reviews
@@ -1657,7 +2341,9 @@
         // Cached on r so openReviewEditor can tell "is this mine already"
         // without a second round trip.
         r._communityReviews = data.reviews || [];
+        r._guestPhotos = data.photos || [];
         renderCommunityReviews(index, r._communityReviews, data.average, data.count || 0);
+        renderPhotoSection(index);
       } catch (e) {
         el.innerHTML = "";
         el.dataset.loaded = ""; // allow a retry next time the card re-expands
@@ -1671,7 +2357,14 @@
       const mine = currentUser ? list.find(rv => rv.userId === currentUser.sub) : null;
       const titleText = count > 0 ? `Community reviews · ★${average.toFixed(1)} (${count})` : 'Community reviews';
       const emptyHint = count === 0 ? `<p class="community-reviews-empty">No reviews yet. Be the first.</p>` : '';
-      const itemsHtml = list.map(rv => {
+      const sorted = sortCommunityReviews(list, communityReviewSort);
+      const sortHtml = list.length >= 2 ? `
+        <div class="community-review-sort" role="group" aria-label="Sort reviews">
+          ${[['helpful', 'Most helpful'], ['recent', 'Newest']].map(([key, label]) =>
+            `<button type="button" class="community-review-sort-btn${communityReviewSort === key ? ' active' : ''}" aria-pressed="${communityReviewSort === key}" onclick="event.stopPropagation(); setCommunityReviewSort(${index}, '${key}')">${label}</button>`
+          ).join('')}
+        </div>` : '';
+      const itemsHtml = sorted.map(rv => {
         // rv.rating is the average of whichever category scores were
         // actually rated (see POST /reviews) and so isn't always a whole
         // number — round to the nearest star for the glyph count rather
@@ -1686,7 +2379,7 @@
         const isMine = currentUser && rv.userId === currentUser.sub;
         const photosHtml = (rv.photos && rv.photos.length > 0) ? `
           <div class="community-review-photos">
-            ${rv.photos.map(url => `<img class="community-review-photo" src="${escapeHtml(url)}" alt="" loading="lazy" onclick="event.stopPropagation(); window.open('${escapeHtml(url)}', '_blank')">`).join("")}
+            ${rv.photos.map(p => `<img class="community-review-photo" src="${escapeHtml(p.url)}" alt="" loading="lazy" onclick="event.stopPropagation(); openGuestPhoto(${index}, ${escapeHtml(JSON.stringify(p.url))})">`).join("")}
           </div>` : '';
         return `
         <div class="community-review">
@@ -1701,6 +2394,7 @@
           ${breakdown ? `<p class="community-review-breakdown">${escapeHtml(breakdown)}</p>` : ''}
           ${rv.text ? `<p class="community-review-text">${escapeHtml(rv.text)}</p>` : ''}
           ${photosHtml}
+          ${helpfulHtml(index, rv, isMine)}
         </div>`;
       }).join("");
       el.innerHTML = `
@@ -1709,7 +2403,88 @@
           <button type="button" class="community-review-write-btn" onclick="event.stopPropagation(); openReviewEditor(${index})">${mine ? 'Edit your review' : 'Write a review'}</button>
         </div>
         ${emptyHint}
+        ${sortHtml}
         <div class="community-review-list">${itemsHtml}</div>`;
+    }
+
+    // --- Helpful votes + sorting (see POST /reviews/:id/helpful). One
+    // choice for every card, not per restaurant: someone who prefers
+    // "Newest" wants it everywhere.
+    let communityReviewSort = 'helpful';
+
+    // "Most helpful" damps votes by age so an early review can't sit on top
+    // forever just for having been seen longest: a vote counts fully for
+    // about a month, then gradually less. Ties (e.g. no votes yet) fall
+    // back to newest first.
+    function helpfulScore(rv) {
+      const ageDays = (Date.now() - rv.createdAt) / 86400000;
+      return (rv.helpfulCount || 0) / Math.sqrt(1 + ageDays / 30);
+    }
+
+    function sortCommunityReviews(list, sort) {
+      const newest = (a, b) => b.createdAt - a.createdAt;
+      return [...list].sort(sort === 'helpful'
+        ? (a, b) => helpfulScore(b) - helpfulScore(a) || newest(a, b)
+        : newest);
+    }
+
+    function setCommunityReviewSort(index, sort) {
+      communityReviewSort = sort;
+      const r = currentResults[index];
+      if (r && r._communityReviews) rerenderCommunityReviews(index);
+    }
+
+    function rerenderCommunityReviews(index) {
+      const list = currentResults[index]._communityReviews;
+      const average = list.length ? list.reduce((s, rv) => s + rv.rating, 0) / list.length : null;
+      renderCommunityReviews(index, list, average, list.length);
+    }
+
+    // Your own review shows its count (if any) but no button.
+    function helpfulHtml(index, rv, isMine) {
+      const n = rv.helpfulCount || 0;
+      const countText = n === 0 ? '' : n === 1 ? '1 person found this helpful' : `${n} people found this helpful`;
+      if (isMine) return countText ? `<p class="community-review-helpful-count">${countText}</p>` : '';
+      return `
+        <div class="community-review-helpful" data-review-id="${escapeHtml(rv.id)}">
+          <button type="button" class="community-review-helpful-btn${rv.votedHelpful ? ' active' : ''}" aria-pressed="${!!rv.votedHelpful}" onclick="event.stopPropagation(); toggleHelpful(${index}, ${escapeHtml(JSON.stringify(rv.id))})">
+            <i class="ti ti-thumb-up"></i> Helpful
+          </button>
+          ${countText ? `<span class="community-review-helpful-count">${countText}</span>` : ''}
+        </div>`;
+    }
+
+    // Optimistic: the button flips immediately and the list keeps its
+    // current order (re-sorting under someone's thumb would make the review
+    // they just tapped jump away); the server's answer then corrects the
+    // count if it differs.
+    async function toggleHelpful(index, reviewId) {
+      const r = currentResults[index];
+      const rv = r?._communityReviews?.find(x => x.id === reviewId);
+      if (!rv) return;
+      if (!currentUser) { showToast('Sign in to mark reviews helpful'); return; }
+      const before = { votedHelpful: rv.votedHelpful, helpfulCount: rv.helpfulCount };
+      rv.votedHelpful = !rv.votedHelpful;
+      rv.helpfulCount = (rv.helpfulCount || 0) + (rv.votedHelpful ? 1 : -1);
+      updateHelpfulButton(index, rv);
+      try {
+        const res = await fetch(`/reviews/${encodeURIComponent(reviewId)}/helpful`, { method: 'POST' });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(data?.error);
+        rv.votedHelpful = data.votedHelpful;
+        rv.helpfulCount = data.helpfulCount;
+      } catch (e) {
+        Object.assign(rv, before);
+        showToast(e.message || "Couldn't save that, try again");
+      }
+      updateHelpfulButton(index, rv);
+    }
+
+    function updateHelpfulButton(index, rv) {
+      const el = document.getElementById(`communityReviews-${index}`);
+      const row = el && [...el.querySelectorAll('.community-review-helpful')]
+        .find(d => d.dataset.reviewId === rv.id);
+      if (row) row.outerHTML = helpfulHtml(index, rv, false);
     }
 
     let reviewEditorIndex = null;
@@ -1724,9 +2499,17 @@
     // detail on top, for whoever wants to give it.
     let reviewEditorOverall = 0;
     let reviewEditorRatings = { food: 0, service: 0, atmosphere: 0 };
+    // Mirrors the server's limits (MAX_REVIEW_PHOTOS / MAX_REVIEW_PHOTO_BYTES /
+    // REVIEW_PHOTO_MIME_EXT in server.js) — checked here too so a rejected
+    // pick is flagged instantly, not after uploading it.
     const MAX_REVIEW_PHOTOS = 3;
+    const MAX_REVIEW_PHOTO_BYTES = 5 * 1024 * 1024;
+    const REVIEW_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
     let reviewEditorExistingPhotos = []; // URLs already on the review (server-side), kept unless replaced
     let reviewEditorPhotoFiles = [];     // freshly-picked File objects, not yet uploaded
+    // Parallel to reviewEditorPhotoFiles: 'auto' (let the server's AI pick,
+    // the default) or 'food' | 'atmosphere' | 'place' | 'other'.
+    let reviewEditorPhotoCategories = [];
 
     function openReviewEditor(index) {
       if (!currentUser) {
@@ -1745,6 +2528,7 @@
       };
       reviewEditorExistingPhotos = existing ? (existing.photos || []) : [];
       reviewEditorPhotoFiles = [];
+      reviewEditorPhotoCategories = [];
       document.getElementById('reviewEditorTitle').textContent = existing ? `Edit your review of ${r.name}` : `Review ${r.name}`;
       document.getElementById('reviewEditorText').value = existing ? (existing.text || '') : '';
       document.getElementById('reviewEditorDeleteBtn').hidden = !existing;
@@ -1781,18 +2565,137 @@
     }
 
     const RESERVATION_STATUS_LABELS = {
-      pending: { icon: "ti-clock", text: "Reservation requested, waiting on the restaurant" },
+      pending: { icon: "ti-clock", text: "Requested, waiting on the restaurant" },
+      alternatives_offered: { icon: "ti-calendar-time", text: "New time suggested, tap to answer" },
       confirmed: { icon: "ti-circle-check", text: "Reservation confirmed" },
-      declined: { icon: "ti-circle-x", text: "Reservation declined" },
+      declined: { icon: "ti-circle-x", text: "They couldn't take this one" },
+      expired: { icon: "ti-clock-off", text: "No reply from the restaurant" },
     };
 
+    // "2026-09-26" → "Fri 26 Sep" — short enough for a badge or a list row.
+    // UTC in, UTC out, so the viewer's own timezone never shifts the day.
+    function formatShortReservationDate(dateStr) {
+      const d = new Date(`${dateStr}T00:00:00Z`);
+      if (Number.isNaN(d.getTime())) return dateStr || '';
+      return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+    }
+
+    // Same wall-clock-plus-browser-offset rule the server uses (see
+    // slotTimestamp in server.js), so "upcoming" vs "past" agrees on both.
+    function reservationSlotTime(date, time, tzOffset) {
+      const [y, mo, d] = (date || '').split('-').map(Number);
+      const [h, mi] = (time || '').split(':').map(Number);
+      return Date.UTC(y, mo - 1, d, h, mi) + (tzOffset || 0) * 60000;
+    }
+
+    // Clickable — the card is where people notice a reservation, Bookings
+    // is where they act on it (pick a suggested time, cancel...).
     function reservationBadgeHtml(r) {
       const record = r && r.place_id ? loadReservationRecords()[r.place_id] : null;
       const info = record && RESERVATION_STATUS_LABELS[record.status];
       if (!info) return "";
-      const when = record.date ? ` · ${record.date}${record.time ? ` ${record.time}` : ""}` : "";
-      return `<div class="reservation-status-line ${record.status}"><i class="ti ${info.icon}"></i> ${escapeHtml(info.text + when)}</div>`;
+      const when = record.date ? ` · ${formatShortReservationDate(record.date)}${record.time ? ` ${record.time}` : ""}` : "";
+      return `<button type="button" class="reservation-status-line ${record.status}" onclick="event.stopPropagation(); showBookingsView()"><i class="ti ${info.icon}"></i> ${escapeHtml(info.text + when)}</button>`;
     }
+
+    // --- Server sync. GET /reservations is the source of truth; the
+    // localStorage records above are rebuilt from it each time, so a card's
+    // badge reflects what actually happened (the restaurant answered, a
+    // request expired...) even if it happened on another device.
+    let myReservations = null; // null = not loaded yet
+    let reservationSyncTimer = null;
+    let lastReservationSyncAt = 0;
+    let reservationSyncInFlight = null;
+    const RESERVATION_SYNC_INTERVAL_MS = 2 * 60 * 1000;
+
+    // Which reservation a restaurant card should badge: anything still
+    // open always wins; a closed one only shows for a few days (a "declined"
+    // badge on that restaurant forever would just be noise), and never one
+    // the guest cancelled themselves — they know.
+    function pickBadgeReservation(list) {
+      const now = Date.now();
+      const active = list.filter(rv =>
+        rv.status === 'pending' || rv.status === 'alternatives_offered' ||
+        (rv.status === 'confirmed' && reservationSlotTime(rv.date, rv.time, rv.tz_offset) > now));
+      if (active.length > 0) {
+        const rank = { alternatives_offered: 0, confirmed: 1, pending: 2 };
+        return active.sort((a, b) => rank[a.status] - rank[b.status] || b.createdAt - a.createdAt)[0];
+      }
+      const recent = list.filter(rv => (rv.status === 'declined' || rv.status === 'expired') && now - rv.updatedAt < 3 * 24 * 60 * 60 * 1000);
+      return recent.sort((a, b) => b.updatedAt - a.updatedAt)[0] || null;
+    }
+
+    function rebuildReservationRecords() {
+      const byPlace = {};
+      (myReservations || []).forEach(rv => {
+        if (rv.place_id) (byPlace[rv.place_id] = byPlace[rv.place_id] || []).push(rv);
+      });
+      const records = {};
+      for (const [placeId, list] of Object.entries(byPlace)) {
+        const rv = pickBadgeReservation(list);
+        // Kept even without a badge-worthy reservation — it's also what
+        // pre-fills the restaurant email next time (see openReservationModal).
+        const latest = list.slice().sort((a, b) => b.createdAt - a.createdAt)[0];
+        records[placeId] = rv
+          ? { id: rv.id, status: rv.status, restaurant_email: rv.restaurant_email, date: rv.date, time: rv.time }
+          : { id: latest.id, status: null, restaurant_email: latest.restaurant_email };
+      }
+      localStorage.setItem(RESERVATION_RECORDS_KEY, JSON.stringify(records));
+    }
+
+    function refreshVisibleReservationBadges() {
+      currentResults.forEach((r, index) => { if (r?.place_id) updateReservationBadge(index); });
+    }
+
+    function updateBookingsNavDot() {
+      const unseen = (myReservations || []).filter(rv => rv.guest_unseen).length;
+      document.getElementById('bookingsNavDot').hidden = unseen === 0;
+    }
+
+    // Shared by the timer, app focus, card expands and every action —
+    // concurrent callers share one request instead of each firing their own
+    // (the reservations rate limit is only 10/min).
+    function syncReservations() {
+      if (!currentUser) return Promise.resolve();
+      if (reservationSyncInFlight) return reservationSyncInFlight;
+      reservationSyncInFlight = (async () => {
+        try {
+          const res = await fetch('/reservations');
+          if (!res.ok) return;
+          const data = await res.json();
+          myReservations = data.reservations || [];
+          lastReservationSyncAt = Date.now();
+          rebuildReservationRecords();
+          updateBookingsNavDot();
+          refreshVisibleReservationBadges();
+          if (!document.getElementById('bookingsView').hidden) renderBookingsView();
+        } catch (e) {
+          // Offline or similar — keep showing what we had; next tick retries.
+        } finally {
+          reservationSyncInFlight = null;
+        }
+      })();
+      return reservationSyncInFlight;
+    }
+
+    function startReservationSync() {
+      stopReservationSync();
+      syncReservations();
+      reservationSyncTimer = setInterval(() => {
+        if (document.visibilityState === 'visible') syncReservations();
+      }, RESERVATION_SYNC_INTERVAL_MS);
+    }
+
+    function stopReservationSync() {
+      clearInterval(reservationSyncTimer);
+      reservationSyncTimer = null;
+    }
+
+    // Coming back to the app (switching tabs, unlocking the phone) is
+    // exactly when someone would expect a restaurant's answer to show up.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastReservationSyncAt > 30000) syncReservations();
+    });
 
     // Only the containers actually showing this index right now — the
     // results list keeps its old cards around (hidden) after a saved/
@@ -1826,9 +2729,89 @@
       });
     }
 
-    let reservationModalIndex = null;
+    // --- How each restaurant takes bookings (see GET /booking-options).
+    // Fetched lazily per card, like photos and reviews — it may involve a
+    // visit to the restaurant's website the first time anyone looks.
+    const WALK_IN_REASONS = {
+      restaurant: "The restaurant told us they don't take reservations",
+      website: "Their website says walk-ins only",
+      google: "Google lists them as not taking reservations",
+    };
 
-    function openReservationModal(index) {
+    function bookingActionHtml(r, index) {
+      const opts = r._bookingOptions;
+      const stop = 'event.stopPropagation();';
+      if (opts?.mode === 'online') {
+        return `<button class="card-map-btn book-online" onclick="${stop} bookOnline(${index})" title="Book on ${escapeHtml(opts.provider_name)}"><i class="ti ti-calendar-event"></i> Book online</button>` +
+          `<button class="card-map-btn" onclick="${stop} openReservationModal(${index})" title="Send a request by email instead"><i class="ti ti-mail"></i> Email request</button>`;
+      }
+      if (opts?.mode === 'walk_in') {
+        // Only the restaurant's own word is final — Google/website signals
+        // can be stale or misread, so those still allow asking.
+        return `<span class="card-map-btn walk-in" title="${escapeHtml(WALK_IN_REASONS[opts.reason] || '')}"><i class="ti ti-walk"></i> Walk-in only</span>` +
+          (opts.reason === 'restaurant' ? '' : `<button class="card-map-btn" onclick="${stop} openReservationModal(${index})"><i class="ti ti-mail"></i> Ask anyway</button>`);
+      }
+      return `<button class="card-map-btn" onclick="${stop} openReservationModal(${index})"><i class="ti ti-calendar-event"></i> Reserve</button>`;
+    }
+
+    async function loadBookingOptions(index) {
+      const r = currentResults[index];
+      if (!r?.place_id || !currentUser || r._bookingOptions || r._bookingOptionsLoading) return;
+      r._bookingOptionsLoading = true;
+      try {
+        const res = await fetch(`/booking-options?place_id=${encodeURIComponent(r.place_id)}`);
+        if (res.ok) r._bookingOptions = await res.json();
+      } catch (e) {
+        // Keep plain Reserve — the email flow works for any restaurant.
+      } finally {
+        r._bookingOptionsLoading = false;
+      }
+      if (currentResults[index] !== r || !r._bookingOptions) return;
+      visibleCardsFor(index).forEach(card => {
+        const slot = card.querySelector('.booking-action');
+        if (slot) slot.innerHTML = bookingActionHtml(r, index);
+      });
+    }
+
+    // Systems verified to accept date/party size/time in the link go
+    // through our own date/time picker first, then open pre-filled; the
+    // rest just open the restaurant's booking page — asking for details we
+    // can't pass along would only make people type them twice.
+    function bookOnline(index) {
+      const opts = currentResults[index]?._bookingOptions;
+      if (opts?.mode !== 'online') return;
+      if (opts.prefill) openReservationModal(index, { online: true });
+      else window.open(opts.url, '_blank', 'noopener');
+    }
+
+    function continueToOnlineBooking() {
+      const r = currentResults[reservationModalIndex];
+      const opts = r?._bookingOptions;
+      if (!opts?.url) return;
+      const date = document.getElementById('reservationDate').value;
+      const time = document.getElementById('reservationTime').value;
+      const partySize = parseInt(document.getElementById('reservationPartySize').value, 10);
+      if (!date || !time) { setReservationModalStatus('Pick a date and time', true); return; }
+      if (!Number.isInteger(partySize) || partySize < 1 || partySize > 50) { setReservationModalStatus('Guests must be between 1 and 50', true); return; }
+      // SevenRooms' own search parameters — verified in a real browser to
+      // land on that date, party size and time with live availability. Its
+      // search only takes :00/:30 (a quarter-hour like 20:15 silently falls
+      // back to "All Times"), so round down to the half hour: the results
+      // then start right around the time that was picked.
+      const [h, m] = time.split(':');
+      const url = new URL(opts.url);
+      url.searchParams.set('date', date);
+      url.searchParams.set('party_size', String(partySize));
+      url.searchParams.set('start_time', `${h}:${Number(m) < 30 ? '00' : '30'}`);
+      window.open(url.toString(), '_blank', 'noopener');
+      closeReservationModal();
+      showToast(`Opened ${opts.provider_name}. Finish your booking there.`);
+    }
+
+    let reservationModalIndex = null;
+    let reservationModalMode = 'email'; // 'email' (our request flow) | 'online' (hand-off to the restaurant's own system)
+
+    function openReservationModal(index, { online = false } = {}) {
       if (!currentUser) {
         showToast("Sign in to request a reservation");
         return;
@@ -1836,11 +2819,30 @@
       const r = currentResults[index];
       if (!r || !r.place_id) return;
       reservationModalIndex = index;
+      reservationModalMode = online && r._bookingOptions?.mode === 'online' ? 'online' : 'email';
+      const opts = r._bookingOptions;
+      const isOnline = reservationModalMode === 'online';
+      // Online hand-off only needs date/time/guests — contact details and
+      // notes get entered on the restaurant's own booking page.
+      ['reservationEmailRow', 'reservationContactRow', 'reservationNotesRow'].forEach(id => {
+        document.getElementById(id).hidden = isOnline;
+      });
+      const modeNote = isOnline
+        ? `You'll finish on ${opts.provider_name}, which shows their live free tables and confirms straight away.`
+        : opts?.maybe_no_reservations
+          ? "Cafés and takeaways often don't take reservations. A quick call first might save you the wait."
+          : opts?.mode === 'walk_in'
+            ? `${WALK_IN_REASONS[opts.reason] || "They may not take reservations"}, but you can still ask.`
+            : '';
+      const noteEl = document.getElementById('reservationModeNote');
+      noteEl.textContent = modeNote;
+      noteEl.hidden = !modeNote;
+      document.getElementById('reservationTitle').textContent = isOnline ? `Book at ${r.name}` : `Request a table at ${r.name}`;
       const existing = loadReservationRecords()[r.place_id];
-      document.getElementById('reservationTitle').textContent = `Request a table at ${r.name}`;
       document.getElementById('reservationRestaurantEmail').value = existing?.restaurant_email || '';
       reservationPrefilledEmail = existing?.restaurant_email || null;
-      if (existing?.restaurant_email) setReservationEmailHint('The address you used last time');
+      if (isOnline) setReservationEmailHint('');
+      else if (existing?.restaurant_email) setReservationEmailHint('The address you used last time');
       else prefillRestaurantEmail(index);
       const dateEl = document.getElementById('reservationDate');
       // Local date, not toISOString() (UTC) — late evening in Copenhagen
@@ -1848,16 +2850,99 @@
       const now = new Date();
       dateEl.min = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       if (!dateEl.value || dateEl.value < dateEl.min) dateEl.value = dateEl.min;
-      // A typical dinner time instead of an empty --:-- — one less field
-      // to fill for the common case, still just a tap to change.
-      const timeEl = document.getElementById('reservationTime');
-      if (!timeEl.value) timeEl.value = '19:00';
+      // Real bookable times for that date — and if it has none left (closed,
+      // or too late tonight), jump straight to the next day that does.
+      loadReservationSlots(index, { autoAdvance: true });
       document.getElementById('reservationContact').value = currentUser.email || '';
       document.getElementById('reservationNotes').value = '';
-      setReservationModalStatus('');
+      showReservationStep('form');
       document.getElementById('reservationSubmitBtn').disabled = false;
       document.getElementById('reservationOverlay').classList.add('open');
     }
+
+    // --- Bookable times (see GET /reservation-slots). The dropdown only ever
+    // holds times the server will accept: quarter-hours inside the
+    // restaurant's opening hours, from 15 minutes after its local "now".
+    let reservationSlotsSeq = 0;
+    // Evening default — the most common booking — picked as the nearest
+    // offered time, so a lunch-only place still gets a sensible preselect.
+    const PREFERRED_RESERVATION_TIME = '19:00';
+
+    function fillReservationTimeSelect(slots, keep) {
+      const select = document.getElementById('reservationTime');
+      if (slots.length === 0) {
+        select.innerHTML = `<option value="">No times</option>`;
+        select.disabled = true;
+        return;
+      }
+      const toMin = t => parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(3), 10);
+      const target = slots.includes(keep) ? keep
+        : slots.reduce((best, t) => Math.abs(toMin(t) - toMin(PREFERRED_RESERVATION_TIME)) < Math.abs(toMin(best) - toMin(PREFERRED_RESERVATION_TIME)) ? t : best, slots[0]);
+      select.innerHTML = slots.map(t => `<option value="${t}"${t === target ? ' selected' : ''}>${t}</option>`).join('');
+      select.disabled = false;
+    }
+
+    function setReservationSlotsHint(html) {
+      document.getElementById('reservationSlotsHint').innerHTML = html;
+    }
+
+    function jumpToReservationDate(date) {
+      document.getElementById('reservationDate').value = date;
+      if (reservationModalIndex !== null) loadReservationSlots(reservationModalIndex);
+    }
+
+    async function loadReservationSlots(index, { autoAdvance = false, movedFrom = null } = {}) {
+      const r = currentResults[index];
+      const dateEl = document.getElementById('reservationDate');
+      const select = document.getElementById('reservationTime');
+      const date = dateEl.value;
+      if (!r?.place_id || !date) return;
+      const seq = ++reservationSlotsSeq;
+      const keep = select.value;
+      select.disabled = true;
+      select.innerHTML = `<option value="">Loading…</option>`;
+      setReservationSlotsHint('');
+      let data = null;
+      try {
+        const res = await fetch(`/reservation-slots?place_id=${encodeURIComponent(r.place_id)}&date=${encodeURIComponent(date)}&tz_offset=${new Date().getTimezoneOffset()}`);
+        if (res.ok) data = await res.json();
+      } catch (e) { /* handled below */ }
+      // Modal closed/reopened, or the date changed again, while this was in flight.
+      if (seq !== reservationSlotsSeq || reservationModalIndex !== index) return;
+
+      if (!data) {
+        // Couldn't reach the server — still offer quarter-hours so the form
+        // isn't dead; the server checks the actual hours on send anyway.
+        const fallback = [];
+        for (let m = 11 * 60; m <= 22 * 60; m += 15) fallback.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+        fillReservationTimeSelect(fallback, keep);
+        setReservationSlotsHint("Couldn't load opening hours. Times will be checked when you send.");
+        return;
+      }
+      if (data.slots.length === 0 && autoAdvance && data.next_open_date) {
+        dateEl.value = data.next_open_date;
+        return loadReservationSlots(index, { movedFrom: date });
+      }
+      fillReservationTimeSelect(data.slots, keep);
+
+      const nextBtn = data.next_open_date
+        ? ` Next open: <button type="button" onclick="jumpToReservationDate('${data.next_open_date}')">${escapeHtml(formatShortReservationDate(data.next_open_date))}</button>`
+        : '';
+      if (!data.hours_known) {
+        setReservationSlotsHint("We don't know their opening hours. Check with the restaurant.");
+      } else if (data.slots.length === 0) {
+        setReservationSlotsHint((data.closed_all_day ? 'Closed on this day.' : 'No more times left on this day.') + nextBtn);
+      } else {
+        const moved = movedFrom
+          ? `${movedFrom === data.today ? 'No more times today' : `Closed ${escapeHtml(formatShortReservationDate(movedFrom))}`}, showing the next open day. `
+          : '';
+        setReservationSlotsHint(`${moved}Open ${escapeHtml(data.open_ranges.join(', '))}`);
+      }
+    }
+
+    document.getElementById('reservationDate').addEventListener('change', () => {
+      if (reservationModalIndex !== null) loadReservationSlots(reservationModalIndex);
+    });
 
     function setReservationEmailHint(text, searching = false) {
       const el = document.getElementById('reservationEmailHint');
@@ -1922,6 +3007,7 @@
 
     function closeReservationModal() {
       reservationEmailLookupSeq++; // drop any lookup still in flight for this modal
+      reservationSlotsSeq++;
       setReservationEmailHint('');
       document.getElementById('reservationOverlay').classList.remove('open');
       reservationModalIndex = null;
@@ -1933,10 +3019,39 @@
       el.classList.toggle('error', isError);
     }
 
-    async function submitReservationRequest() {
+    // What the confirm step showed — submitReservationRequest sends exactly
+    // this, not whatever the (hidden) form fields say by then.
+    let pendingReservationPayload = null;
+
+    function showReservationStep(step) {
+      const confirming = step === 'confirm';
+      document.getElementById('reservationFormStep').hidden = confirming;
+      document.getElementById('reservationConfirmStep').hidden = !confirming;
+      document.getElementById('reservationBackBtn').hidden = !confirming;
+      const submitBtn = document.getElementById('reservationSubmitBtn');
+      const online = reservationModalMode === 'online';
+      const providerName = currentResults[reservationModalIndex]?._bookingOptions?.provider_name || 'their site';
+      submitBtn.textContent = confirming ? 'Yes, send request' : online ? `Continue on ${providerName}` : 'Review request';
+      submitBtn.onclick = confirming ? submitReservationRequest : online ? continueToOnlineBooking : reviewReservationRequest;
+      if (!confirming) pendingReservationPayload = null;
+      setReservationModalStatus('');
+    }
+
+    // Same UTC-anchored "Friday 25 September 2026" the email itself uses
+    // (see formatReservationDate in server.js), so what's confirmed here is
+    // literally what the restaurant will read.
+    function formatReservationDateLabel(dateStr) {
+      const d = new Date(`${dateStr}T00:00:00Z`);
+      if (Number.isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+    }
+
+    // Step one of sending: check the form here (so the confirm screen never
+    // offers something the server would just bounce), then show exactly
+    // what's about to go out and to whom.
+    function reviewReservationRequest() {
       if (reservationModalIndex === null) return;
-      const index = reservationModalIndex;
-      const r = currentResults[index];
+      const r = currentResults[reservationModalIndex];
       if (!r || !r.place_id) return;
       const payload = {
         place_id: r.place_id,
@@ -1947,7 +3062,61 @@
         party_size: parseInt(document.getElementById('reservationPartySize').value, 10),
         contact_info: document.getElementById('reservationContact').value.trim(),
         notes: document.getElementById('reservationNotes').value.trim(),
+        // Lets the server tell when this time has passed in the guest's own
+        // timezone (see slotTimestamp in server.js).
+        tz_offset: new Date().getTimezoneOffset(),
+        // Display snapshot for the Bookings list.
+        restaurant_phone: r.phone || null,
+        restaurant_photo: r.photo_reference || null,
+        latitude: r.latitude ?? null,
+        longitude: r.longitude ?? null,
       };
+      const slotAt = payload.date && payload.time ? reservationSlotTime(payload.date, payload.time, payload.tz_offset) : null;
+      const problem =
+        !payload.restaurant_email ? "Add the restaurant's email first"
+        : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.restaurant_email) ? "That restaurant email doesn't look right"
+        : !payload.date ? 'Pick a date'
+        : !payload.time ? 'Pick a time'
+        : slotAt !== null && slotAt < Date.now() ? 'That time has already passed, pick a later one'
+        : !Number.isInteger(payload.party_size) || payload.party_size < 1 || payload.party_size > 50 ? 'Guests must be between 1 and 50'
+        : null;
+      if (problem) {
+        setReservationModalStatus(problem, true);
+        return;
+      }
+      pendingReservationPayload = payload;
+      document.getElementById('reservationConfirmRecipient').textContent = payload.restaurant_email;
+      const own = [currentUser?.email, payload.contact_info].filter(Boolean).map(e => e.toLowerCase());
+      document.getElementById('reservationConfirmSelf').hidden = !own.includes(payload.restaurant_email.toLowerCase());
+      // Not blocked (two tables on different days is legitimate) — just
+      // made visible, since it's more often a forgotten earlier request.
+      const openHere = (myReservations || []).find(rv => rv.place_id === r.place_id &&
+        (rv.status === 'pending' || rv.status === 'alternatives_offered' ||
+         (rv.status === 'confirmed' && reservationSlotTime(rv.date, rv.time, rv.tz_offset) > Date.now())));
+      const dupEl = document.getElementById('reservationConfirmDuplicate');
+      dupEl.hidden = !openHere;
+      if (openHere) {
+        const what = openHere.status === 'confirmed' ? 'a confirmed table' : 'an open request';
+        dupEl.textContent = `You already have ${what} here for ${formatShortReservationDate(openHere.date)} at ${openHere.time}. This sends another one.`;
+      }
+      const lines = [
+        ['ti-building-store', r.name],
+        ['ti-calendar', formatReservationDateLabel(payload.date)],
+        ['ti-clock', payload.time],
+        ['ti-users', `${payload.party_size} ${payload.party_size === 1 ? 'guest' : 'guests'}`],
+        payload.notes ? ['ti-note', payload.notes] : null,
+      ].filter(Boolean);
+      document.getElementById('reservationConfirmSummary').innerHTML = lines
+        .map(([icon, text]) => `<div><i class="ti ${icon}"></i><span>${escapeHtml(text)}</span></div>`).join('');
+      showReservationStep('confirm');
+    }
+
+    async function submitReservationRequest() {
+      if (reservationModalIndex === null || !pendingReservationPayload) return;
+      const index = reservationModalIndex;
+      const r = currentResults[index];
+      if (!r || !r.place_id) return;
+      const payload = pendingReservationPayload;
       const submitBtn = document.getElementById('reservationSubmitBtn');
       submitBtn.disabled = true; // a double tap would email the restaurant twice
       setReservationModalStatus('Sending…');
@@ -1971,6 +3140,7 @@
         closeReservationModal();
         showToast("Reservation request sent");
         updateReservationBadge(index);
+        syncReservations();
       } catch (e) {
         setReservationModalStatus("Couldn't send the request, try again", true);
       } finally {
@@ -1978,30 +3148,283 @@
       }
     }
 
-    // Only worth a request while pending — confirmed/declined are final on
-    // the server (see handleReservationResponse), so those never change
-    // again. Tracked per place_id so expanding the same card twice while a
-    // check is still in flight doesn't fire a duplicate.
-    const reservationRefreshInFlight = new Set();
-    async function refreshReservationStatus(index) {
+    // Expanding a card with an open request is a natural moment to check
+    // for news — one list sync covers every card at once, throttled so
+    // flicking through a results list doesn't burn the rate limit.
+    function refreshReservationStatus(index) {
       const r = currentResults[index];
       if (!r || !r.place_id || !currentUser) return;
       const record = loadReservationRecords()[r.place_id];
-      if (!record || record.status !== 'pending' || reservationRefreshInFlight.has(r.place_id)) return;
-      reservationRefreshInFlight.add(r.place_id);
+      if (!record || !['pending', 'alternatives_offered'].includes(record.status)) return;
+      if (Date.now() - lastReservationSyncAt > 20000) syncReservations();
+    }
+
+    // --- Bookings page (see #bookingsView) ---
+
+    function showBookingsView() {
+      closeMenu();
+      closeBottomSheet();
+      stopActiveVoiceInput();
+      hideSavedView();
+      document.getElementById('bookingsView').hidden = false;
+      renderBookingsView();
+      // Fresh data, then clear the dot — the "New" tags stay visible for
+      // this visit (they're rendered from the list we already had), the
+      // server just stops counting them as unseen.
+      syncReservations().then(markReservationsSeen);
+    }
+
+    function hideBookingsView() {
+      document.getElementById('bookingsView').hidden = true;
+    }
+
+    async function markReservationsSeen() {
+      if (!(myReservations || []).some(rv => rv.guest_unseen)) return;
+      document.getElementById('bookingsNavDot').hidden = true;
       try {
-        const res = await fetch(`/reservations/${encodeURIComponent(record.id)}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const status = data.reservation?.status;
-        if (status && status !== record.status) {
-          saveReservationRecord(r.place_id, { ...record, status });
-          updateReservationBadge(index);
+        await fetch('/reservations/seen', { method: 'POST' });
+      } catch (e) { /* the dot just comes back on the next sync */ }
+    }
+
+    function bookingById(id) {
+      return (myReservations || []).find(rv => rv.id === id);
+    }
+
+    function timeAgo(ms) {
+      const mins = Math.round((Date.now() - ms) / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return `${mins} min ago`;
+      const hours = Math.round(mins / 60);
+      if (hours < 24) return `${hours}h ago`;
+      const days = Math.round(hours / 24);
+      return `${days} day${days > 1 ? 's' : ''} ago`;
+    }
+
+    // Past this without an answer, a phone call is usually the faster way
+    // to actually get a table — small restaurants don't watch their inbox.
+    const RESERVATION_NUDGE_AFTER_MS = 3 * 60 * 60 * 1000;
+
+    function bookingStatusLine(rv) {
+      switch (rv.status) {
+        case 'pending': return ['ti-clock', `Waiting for reply · sent ${timeAgo(rv.createdAt)}`];
+        case 'alternatives_offered': return ['ti-calendar-time', `Can't do ${rv.time}, but suggested:`];
+        case 'confirmed': return ['ti-circle-check', rv.accepted_alternative ? 'Confirmed (a time they suggested)' : 'Confirmed'];
+        case 'declined': return ['ti-circle-x', rv.no_reservations ? "They don't take reservations, just walk in" : "They couldn't take this one"];
+        case 'cancelled': return ['ti-ban', rv.cancel_kind === 'declined_alternatives' ? 'Closed, none of their times worked' : rv.cancel_kind === 'withdrew_request' ? 'You withdrew this request' : 'You cancelled'];
+        case 'expired': return ['ti-clock-off', rv.expired_from === 'alternatives_offered' ? 'Closed, no time was picked in time' : 'No reply before the time passed'];
+        default: return ['ti-help', rv.status];
+      }
+    }
+
+    function bookingCardHtml(rv, section) {
+      const photoHtml = rv.restaurant_photo
+        ? `<img class="saved-list-photo" src="/photo?ref=${encodeURIComponent(rv.restaurant_photo)}" alt="" loading="lazy" onerror="this.remove()">`
+        : `<div class="saved-list-photo saved-list-photo-empty"><i class="ti ti-tool-kitchen-2"></i></div>`;
+      const [icon, statusText] = bookingStatusLine(rv);
+      const moved = rv.original_date
+        ? `<s>${escapeHtml(`${formatShortReservationDate(rv.original_date)} ${rv.original_time}`)}</s> → `
+        : '';
+      const when = `${moved}${escapeHtml(`${formatShortReservationDate(rv.date)} · ${rv.time} · ${rv.party_size} ${rv.party_size === 1 ? 'guest' : 'guests'}`)}`;
+      const message = rv.restaurant_message
+        ? `<div class="booking-message">${escapeHtml(rv.restaurant_message)}<span>${escapeHtml(rv.restaurant_name)}</span></div>`
+        : '';
+      const idArg = escapeHtml(JSON.stringify(rv.id));
+      const alternatives = rv.status === 'alternatives_offered' ? `
+        <div class="booking-alternatives">
+          ${(rv.alternatives || []).map((a, i) => `<button type="button" class="booking-alt-btn" onclick="event.stopPropagation(); acceptBookingAlternative(${idArg}, ${i})">${escapeHtml(`${formatShortReservationDate(a.date)} ${a.time}`)}</button>`).join('')}
+          <button type="button" class="booking-alt-btn no-thanks" onclick="event.stopPropagation(); declineBookingAlternatives(${idArg})">None of these</button>
+        </div>` : '';
+      const nudge = rv.status === 'pending' && Date.now() - rv.createdAt > RESERVATION_NUDGE_AFTER_MS
+        ? `<p class="booking-nudge">No reply yet. Small places often answer the phone faster than email.</p>`
+        : '';
+      const actions = [];
+      const stop = 'event.stopPropagation();';
+      if (section !== 'past') {
+        actions.push(`<button type="button" class="card-map-btn" onclick="${stop} bookingDirections(${idArg})"><i class="ti ti-directions"></i> Directions</button>`);
+        if (rv.restaurant_phone) actions.push(`<a class="card-map-btn" href="tel:${escapeHtml(rv.restaurant_phone)}" onclick="${stop}"><i class="ti ti-phone"></i> Call</a>`);
+        if (rv.status === 'pending' || rv.status === 'confirmed') {
+          actions.push(`<button type="button" class="card-map-btn danger" onclick="${stop} cancelBooking(${idArg})"><i class="ti ti-x"></i> ${rv.status === 'pending' ? 'Withdraw' : 'Cancel'}</button>`);
         }
+      }
+      // A small corner ✕ rather than a full button row — past bookings are
+      // otherwise just a line of history, and a row for one action made
+      // them read heavier than the open ones above.
+      const removeBtn = section === 'past'
+        ? `<button type="button" class="booking-remove" onclick="${stop} removeBooking(${idArg})" title="Remove from history" aria-label="Remove ${escapeHtml(rv.restaurant_name)} from your booking history"><i class="ti ti-x"></i></button>`
+        : '';
+      const closed = section === 'past';
+      // The whole card opens the restaurant itself (directions, call, ask a
+      // question, reviews) — no hunting for it on the map. Needs place_id,
+      // which every booking made from a restaurant card has.
+      const openAttr = rv.place_id ? `role="button" tabindex="0" onclick="openBookingRestaurant(${idArg})" onkeydown="if(event.key==='Enter'){openBookingRestaurant(${idArg});}"` : '';
+      return `
+        <div class="booking-card ${rv.place_id ? 'clickable' : ''} ${section === 'answer' ? 'needs-answer' : ''} ${closed ? 'closed' : ''}" ${openAttr}>
+          ${removeBtn}
+          <div class="booking-top">
+            ${photoHtml}
+            <div class="booking-info">
+              <span class="booking-name">${escapeHtml(rv.restaurant_name)}${rv.guest_unseen ? '<span class="booking-new">New</span>' : ''}</span>
+              <span class="booking-when">${when}</span>
+              <span class="booking-status ${rv.status}"><i class="ti ${icon}"></i> ${escapeHtml(statusText)}</span>
+            </div>
+          </div>
+          ${alternatives}
+          ${message}
+          ${nudge}
+          ${actions.length ? `<div class="booking-actions">${actions.join('')}</div>` : ''}
+        </div>`;
+    }
+
+    function renderBookingsView() {
+      const el = document.getElementById('bookingsList');
+      if (!el) return;
+      if (myReservations === null) {
+        el.innerHTML = `<p class="saved-view-empty">Loading your bookings…</p>`;
+        return;
+      }
+      if (myReservations.length === 0) {
+        el.innerHTML = `<p class="saved-view-empty">No bookings yet. Tap Reserve on any restaurant to request a table.</p>`;
+        return;
+      }
+      const now = Date.now();
+      const slot = rv => reservationSlotTime(rv.date, rv.time, rv.tz_offset);
+      const bySoonest = (a, b) => slot(a) - slot(b);
+      const sections = [
+        ['answer', 'Needs your answer', myReservations.filter(rv => rv.status === 'alternatives_offered').sort(bySoonest)],
+        ['upcoming', 'Upcoming', myReservations.filter(rv => rv.status === 'confirmed' && slot(rv) > now).sort(bySoonest)],
+        ['waiting', 'Waiting for reply', myReservations.filter(rv => rv.status === 'pending').sort(bySoonest)],
+        ['past', 'Past and closed', myReservations
+          .filter(rv => !['alternatives_offered', 'pending'].includes(rv.status) && !(rv.status === 'confirmed' && slot(rv) > now))
+          .sort((a, b) => slot(b) - slot(a)).slice(0, 20)],
+      ];
+      el.innerHTML = sections
+        .filter(([, , list]) => list.length > 0)
+        .map(([key, label, list]) => `<p class="bookings-section-label">${label}</p>${list.map(rv => bookingCardHtml(rv, key)).join('')}`)
+        .join('');
+    }
+
+    // After any guest action: pull the server's version so the list, the
+    // nav dot and any visible card badge all agree.
+    async function afterBookingAction(res, successMessage) {
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        showToast(data?.error || "That didn't work, try again");
+      } else if (data?.restaurant_notified === false) {
+        // The action itself went through — only the email to the
+        // restaurant didn't, so they need to hear it another way.
+        showToast(`${successMessage}, but we couldn't email the restaurant. Consider calling them.`);
+      } else {
+        showToast(successMessage);
+      }
+      await syncReservations();
+    }
+
+    async function acceptBookingAlternative(id, altIndex) {
+      const rv = bookingById(id);
+      const alt = rv?.alternatives?.[altIndex];
+      if (!alt) return;
+      if (!window.confirm(`Book ${rv.restaurant_name} for ${formatShortReservationDate(alt.date)} at ${alt.time}? It's confirmed straight away.`)) return;
+      try {
+        const res = await fetch(`/reservations/${encodeURIComponent(id)}/accept`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date: alt.date, time: alt.time }),
+        });
+        await afterBookingAction(res, 'Table confirmed');
       } catch (e) {
-        // Leave the badge as-is; the next expand tries again.
-      } finally {
-        reservationRefreshInFlight.delete(r.place_id);
+        showToast("Couldn't reach the server, try again");
+      }
+    }
+
+    async function declineBookingAlternatives(id) {
+      const rv = bookingById(id);
+      if (!rv) return;
+      if (!window.confirm(`None of ${rv.restaurant_name}'s times work? The request will be closed and they'll be told.`)) return;
+      await postBookingCancel(id, 'Request closed');
+    }
+
+    async function cancelBooking(id) {
+      const rv = bookingById(id);
+      if (!rv) return;
+      const question = rv.status === 'pending'
+        ? `Withdraw your request to ${rv.restaurant_name}? They'll be told not to hold a table.`
+        : `Cancel your table at ${rv.restaurant_name} on ${formatShortReservationDate(rv.date)} at ${rv.time}? They'll be told.`;
+      if (!window.confirm(question)) return;
+      await postBookingCancel(id, rv.status === 'pending' ? 'Request withdrawn' : 'Reservation cancelled');
+    }
+
+    // A booking's restaurant as a card-shaped object — the same "one
+    // restaurant via the sheet, details fetched lazily" flow Saved uses
+    // (see viewSavedRestaurant). The booking only snapshots name/photo/
+    // phone/location; hours, reviews, website and the rest load on open.
+    function bookingAsRestaurant(rv) {
+      return {
+        name: rv.restaurant_name,
+        place_id: rv.place_id,
+        latitude: rv.latitude,
+        longitude: rv.longitude,
+        phone: rv.restaurant_phone,
+        photo_reference: rv.restaurant_photo,
+      };
+    }
+
+    function showBookingRestaurant(rv) {
+      stopSuggestionChips();
+      browseMode = true;
+      currentAnalysis = null;
+      analysisBox.style.display = "none";
+      error.style.display = "none";
+      markers.forEach(m => m.remove());
+      markers = [];
+      activeMapIndex = null;
+      clearRoute();
+      hideResultsSheet();
+      currentResults = [bookingAsRestaurant(rv)];
+    }
+
+    // Opens over the Bookings page (the sheet sits above it, same as over
+    // Saved), so closing the sheet lands right back on the list.
+    function openBookingRestaurant(id) {
+      const rv = bookingById(id);
+      if (!rv?.place_id) return;
+      showBookingRestaurant(rv);
+      openBottomSheet(0);
+      loadBrowseMarkerDetails(0);
+    }
+
+    // The app's own route on its own map, like Directions everywhere else —
+    // Google Maps only as a fallback for a booking with no saved location.
+    function bookingDirections(id) {
+      const rv = bookingById(id);
+      if (!rv) return;
+      if (rv.latitude == null || rv.longitude == null) {
+        window.open(restaurantMapsUrl(bookingAsRestaurant(rv)), '_blank', 'noopener');
+        return;
+      }
+      showBookingRestaurant(rv);
+      showRouteOnMap(0, 'driving');
+    }
+
+    async function removeBooking(id) {
+      const rv = bookingById(id);
+      if (!rv) return;
+      if (!window.confirm(`Remove your ${rv.restaurant_name} booking from your history? It's deleted for good.`)) return;
+      try {
+        const res = await fetch(`/reservations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const data = await res.json().catch(() => null);
+        showToast(res.ok ? 'Removed' : (data?.error || "Couldn't remove it, try again"));
+      } catch (e) {
+        showToast("Couldn't reach the server, try again");
+      }
+      await syncReservations();
+    }
+
+    async function postBookingCancel(id, successMessage) {
+      try {
+        const res = await fetch(`/reservations/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+        await afterBookingAction(res, successMessage);
+      } catch (e) {
+        showToast("Couldn't reach the server, try again");
       }
     }
 
@@ -2025,15 +3448,34 @@
           showToast(`Up to ${MAX_REVIEW_PHOTOS} photos per review`);
           break;
         }
-        if (f.type.startsWith('image/')) reviewEditorPhotoFiles.push(f);
+        // The server would silently drop other types (e.g. iPhone HEIC).
+        if (!REVIEW_PHOTO_TYPES.includes(f.type)) {
+          showToast('Photos must be JPEG, PNG or WebP');
+          continue;
+        }
+        if (f.size > MAX_REVIEW_PHOTO_BYTES) {
+          showToast(`Each photo can be at most ${MAX_REVIEW_PHOTO_BYTES / (1024 * 1024)} MB`);
+          continue;
+        }
+        reviewEditorPhotoFiles.push(f);
+        reviewEditorPhotoCategories.push('auto');
       }
       renderReviewEditorPhotoPreviews();
     }
 
     function removeReviewEditorPhoto(i) {
       reviewEditorPhotoFiles.splice(i, 1);
+      reviewEditorPhotoCategories.splice(i, 1);
       renderReviewEditorPhotoPreviews();
     }
+
+    function setReviewPhotoCategory(i, value) {
+      reviewEditorPhotoCategories[i] = value;
+    }
+
+    const REVIEW_PHOTO_CATEGORY_OPTIONS = [
+      ['auto', 'Auto'], ['food', 'Food'], ['atmosphere', 'Atmosphere'], ['place', 'Place'], ['other', 'Other'],
+    ];
 
     function renderReviewEditorPhotoPreviews() {
       const el = document.getElementById('reviewEditorPhotoPreviews');
@@ -2042,12 +3484,23 @@
       // showing both would misrepresent what submitReview is about to send
       // (the existing set only survives if nothing new was picked).
       const existingHtml = reviewEditorPhotoFiles.length === 0
-        ? reviewEditorExistingPhotos.map(url => `<div class="review-editor-photo-thumb"><img src="${escapeHtml(url)}" alt=""></div>`).join("")
+        ? reviewEditorExistingPhotos.map(p => `
+          <div class="review-editor-photo-item">
+            <div class="review-editor-photo-thumb"><img src="${escapeHtml(p.url || p)}" alt=""></div>
+            <span class="review-editor-photo-label">${escapeHtml(PHOTO_CATEGORY_LABELS[p.category] || 'Other')}</span>
+          </div>`).join("")
         : "";
+      // "Auto" = the server's AI suggests a category (see POST /reviews);
+      // picking one yourself always wins.
       const newHtml = reviewEditorPhotoFiles.map((f, i) => `
-        <div class="review-editor-photo-thumb">
-          <img src="${URL.createObjectURL(f)}" alt="">
-          <button type="button" class="review-editor-photo-remove" onclick="removeReviewEditorPhoto(${i})" aria-label="Remove this photo"><i class="ti ti-x"></i></button>
+        <div class="review-editor-photo-item">
+          <div class="review-editor-photo-thumb">
+            <img src="${URL.createObjectURL(f)}" alt="">
+            <button type="button" class="review-editor-photo-remove" onclick="removeReviewEditorPhoto(${i})" aria-label="Remove this photo"><i class="ti ti-x"></i></button>
+          </div>
+          <select class="review-editor-photo-category" aria-label="What this photo shows" onchange="setReviewPhotoCategory(${i}, this.value)">
+            ${REVIEW_PHOTO_CATEGORY_OPTIONS.map(([v, label]) => `<option value="${v}"${reviewEditorPhotoCategories[i] === v ? ' selected' : ''}>${label}</option>`).join('')}
+          </select>
         </div>`
       ).join("");
       el.innerHTML = existingHtml + newHtml;
@@ -2124,6 +3577,13 @@
       });
       formData.append('text', text);
       reviewEditorPhotoFiles.forEach(f => formData.append('photos', f));
+      formData.append('photo_categories', JSON.stringify(reviewEditorPhotoCategories));
+      // Each new photo gets a quick AI check (category + is it OK to show
+      // publicly) before the review is saved — a few seconds, so say so
+      // rather than leave the button looking dead.
+      const submitBtn = document.getElementById('reviewEditorSubmitBtn');
+      submitBtn.disabled = true;
+      submitBtn.textContent = reviewEditorPhotoFiles.length > 0 ? 'Checking photos…' : 'Posting…';
       try {
         // No Content-Type header — the browser sets the multipart boundary
         // itself from the FormData body, and setting it manually here
@@ -2142,6 +3602,9 @@
         showToast("Review posted");
       } catch (e) {
         showToast("Couldn't post your review, try again");
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Post review';
       }
     }
 
@@ -2195,17 +3658,13 @@
       return list;
     }
 
-    function openLightboxFromCard(index, photoPos) {
+    // The card's big hero photo — always the whole stack (All), from the top.
+    function openLightboxFromCard(index) {
       const r = currentResults[index];
       if (!r) return;
-      const list = buildPhotoList(r);
-      if (list.length === 0) return;
-      const startRef = photoPos === -1 ? r.photo_reference : (r.photos || [])[photoPos];
-      lightboxPhotos = list;
-      lightboxIndex = Math.max(0, list.indexOf(startRef));
-      renderLightboxImage();
-      document.getElementById('lightbox').classList.add('open');
-      document.body.style.overflow = 'hidden';
+      r._photoFilter = 'all';
+      renderPhotoSection(index);
+      openPhotoViewer(index, 0);
     }
 
     function closeLightbox() {
@@ -2224,8 +3683,12 @@
     // conceptually came from, matching the swipe direction on mobile.
     function renderLightboxImage(direction) {
       const img = document.getElementById('lightboxImg');
-      const src = `/photo?ref=${encodeURIComponent(lightboxPhotos[lightboxIndex])}`;
+      const item = lightboxPhotos[lightboxIndex];
+      const src = item.src;
       updateLightboxNav();
+      document.getElementById('lightboxCaption').textContent = item.source === 'guest'
+        ? [PHOTO_CATEGORY_LABELS[item.category], `Photo by ${item.by || 'a guest'}`].filter(Boolean).join(' · ')
+        : 'From Google';
 
       const applyImage = () => {
         img.src = src;
@@ -2643,6 +4106,7 @@
 
     function resetSearch() {
       hideSavedView();
+      hideBookingsView();
       stopActiveVoiceInput();
       currentAnalysis = null;
       lastQuery = "";
@@ -2673,7 +4137,6 @@
       error.style.display = "none";
       searchInput.focus();
       startSuggestionChips();
-      updateMapNavIcon();
     }
 
     // Accordion, not independent toggles — having Account/Location/History/
@@ -3082,6 +4545,7 @@
       // shouldn't persist across that switch.
       closeBottomSheet();
       stopActiveVoiceInput();
+      hideBookingsView();
       document.getElementById('savedView').hidden = false;
       renderSavedView();
     }
@@ -3356,6 +4820,7 @@
     // of steps in the same order.
     function switchView() {
       hideSavedView();
+      hideBookingsView();
       stopActiveVoiceInput();
       const mapEl = document.getElementById('mapView');
       mapEl.style.display = 'block';
@@ -3374,7 +4839,6 @@
         resizeMapToFill();
         if (markers.length === 0) initMap(currentResults);
       }, 100);
-      updateMapNavIcon();
     }
 
     // Sizes the map to fill whatever's actually left of the viewport below
@@ -3431,32 +4895,6 @@
       }
     });
 
-    // That same map-pin/bottom-nav button still flips between List and Map
-    // for a real scored search (multiple ranked results genuinely need a
-    // full separate list view) — but browse mode no longer has any List
-    // state to represent at all, now that a restaurant deep dive is a sheet
-    // over the map instead of a navigated-to screen (see openBottomSheet),
-    // so it's just always "Map" there. Called from switchView (covers every
-    // navigation that changes which view is showing) and resetSearch (the
-    // one state change that doesn't go through switchView).
-    function updateMapNavIcon() {
-      let icon = 'ti-map-2', label = 'Map';
-      // A real search: the button names whichever state the results sheet
-      // is NOT currently in — full list showing means tapping reveals more
-      // map, so it reads "Map"; peeking means tapping expands the list, so
-      // it reads "List". Browse mode's single-restaurant sheet has no such
-      // state to represent — it's always just "Map" there (see
-      // browseNearbyOnMap, which no longer does anything else for it).
-      if (!browseMode && (isLoading || currentAnalysis)) {
-        icon = resultsSheetState === 'full' ? 'ti-map-2' : 'ti-list';
-        label = resultsSheetState === 'full' ? 'Map' : 'List';
-      }
-      document.querySelectorAll('.map-nav-icon').forEach(el => el.className = `ti ${icon} map-nav-icon`);
-      document.querySelectorAll('.map-nav-label').forEach(el => el.textContent = label);
-      const topBtn = document.getElementById('navMapTop');
-      if (topBtn) topBtn.title = label === 'List' ? 'Back to list' : 'Browse nearby on the map';
-    }
-
     // Every path leaving a real search (browse mode, a saved/showcase deep
     // dive, Home, or a failed search with nothing to show) hides the
     // results sheet this way — its own backdrop only ever gets set via
@@ -3501,20 +4939,10 @@
       const resultsBackdrop = document.getElementById('resultsSheetBackdrop');
       resultsBackdrop.classList.toggle('open', state === 'full');
       resultsBackdrop.classList.toggle('blocking', state === 'full');
-      updateMapNavIcon();
     }
 
     function handleResultsSheetBackdropTap() {
       if (resultsSheetState !== 'mini') setResultsSheetState('mini');
-    }
-
-    // Discrete peek<->full toggle — used by the bottom nav's Map/List
-    // button (see browseNearbyOnMap), which has no drag gesture of its own
-    // to fall back on. The handle itself no longer calls this directly
-    // (see setupResultsSheetDrag): a tap there now goes through the same
-    // drag pipeline as a real drag, just with ~0 movement.
-    function toggleResultsSheetState() {
-      setResultsSheetState(resultsSheetState === 'full' ? 'peek' : 'full');
     }
 
     // Apple Stocks/Maps-style drag between the sheet's three snap points,
@@ -3581,7 +5009,7 @@
           // set live by pointermove (if any) needs clearing first, or it'd
           // override whatever class setResultsSheetState is about to apply.
           sheet.style.height = '';
-          // Not toggleResultsSheetState() (peek<->full) — tapping the handle
+          // Not a peek<->full toggle — tapping the handle
           // to collapse should match tapping the map to collapse, both
           // dropping all the way to mini, same reasoning as the "Apple
           // Stocks" behavior this sheet is already matching elsewhere.
@@ -3617,39 +5045,31 @@
     // per-place Details), skipping the search box entirely. Typing a real
     // query afterwards still works as normal — search() clears browseMode
     // and takes back over.
+    // The bottom nav's Map button — always labelled Map, and always means
+    // "show me the map", never "show me the list": the map is the app's
+    // main surface. Whatever sits on top of it (Saved, Bookings, the menu,
+    // a restaurant sheet) gets out of the way; a search's results list
+    // collapses to its handle rather than toggling open (the handle, or
+    // "View in list" in a marker's popup, is how you get the list back).
+    // Only with nothing on the map yet does it start a nearby browse.
     async function browseNearbyOnMap() {
-      // Browse mode never leaves the map now — a restaurant deep dive is a
-      // sheet layered on top of it (see openBottomSheet), not a separate
-      // view — so this button has nothing left to toggle to in that mode.
-      // Its only job here is dismissing an open sheet, which is exactly
-      // what tapping the map itself effectively means. Exiting browse mode
-      // entirely is Home's job (bottom-nav/menu), not this button's.
+      const overlayWasOpen = !document.getElementById('savedView').hidden || !document.getElementById('bookingsView').hidden;
+      hideSavedView();
+      hideBookingsView();
+      closeMenu();
       if (browseMode) {
         closeBottomSheet();
-        // That deep dive can now be opened from the Saved page too (see
-        // viewSavedRestaurant), not just the map — tapping Map here should
-        // actually take you there instead of just closing the sheet and
-        // leaving you exactly where you were.
-        if (!document.getElementById('savedView').hidden) {
-          hideSavedView();
-          switchView();
-        }
+        // A deep dive opened from Saved/Bookings never put the map on
+        // screen (the sheet sat over that page) — do it now.
+        if (overlayWasOpen || !document.body.classList.contains('map-active')) switchView();
         return;
       }
-      // A real search that's loading, or already showing results, owns this
-      // button while it's active — it just expands/collapses that search's
-      // results sheet (see setResultsSheetState), not launch a separate
-      // "what's nearby" browse that silently replaces the search.
-      // currentAnalysis is only non-null once a search has actually run —
-      // resetSearch() clears it back to null for the plain start screen.
+      // A search (loading or showing results) keeps its results — Map just
+      // makes room for the map instead of launching a separate browse that
+      // would silently replace the search.
       if (isLoading || currentAnalysis) {
-        // Jump straight to (and highlight) the restaurant whose popup is
-        // open, same reasoning as the browse-mode case above, instead of
-        // just expanding to the top of the full list — but only when
-        // expanding; collapsing from a highlighted card should still just
-        // collapse, not re-highlight it.
-        if (resultsSheetState !== 'full' && activeMapIndex !== null) focusOnList(activeMapIndex);
-        else toggleResultsSheetState();
+        if (!document.body.classList.contains('map-active')) switchView();
+        setResultsSheetState('mini');
         return;
       }
       const got = await ensureLocation();
@@ -3868,7 +5288,6 @@
             // is open — hide it for the duration, restore it on close.
             marker.closeTooltip();
             activeMapIndex = index;
-            updateMapNavIcon();
           })
           // Only reopen it if the zoom level actually has room for it — a
           // popup closing while zoomed out shouldn't bring back a label
@@ -3876,7 +5295,6 @@
           .on('popupclose', () => {
             if (shouldShowLabels()) marker.openTooltip();
             if (activeMapIndex === index) activeMapIndex = null;
-            updateMapNavIcon();
           });
         // Being interactive doesn't make the tooltip forward clicks to the
         // marker's own popup on its own — Leaflet only makes the tooltip
@@ -4154,19 +5572,16 @@
               }
               marker.closeTooltip();
               activeMapIndex = index;
-              updateMapNavIcon();
             })
             .on('popupclose', () => {
               if (shouldShowLabels()) marker.openTooltip();
               if (activeMapIndex === index) activeMapIndex = null;
-              updateMapNavIcon();
             });
           const tooltipEl = marker.getTooltip()?.getElement();
           if (tooltipEl) tooltipEl.addEventListener('click', () => marker.openPopup());
           markers[index] = marker;
         });
         updateMarkerLabelVisibility();
-        updateMapNavIcon();
       }
     }
 
@@ -4560,6 +5975,7 @@
           currentUser = data.user;
           renderAccountUI();
           document.getElementById('loginGate').hidden = true;
+          startReservationSync();
           // Only fires from an actual sign-in, not restoreSession() on a
           // plain reload with an existing cookie — so it shows once per
           // real login rather than on every visit.
@@ -4581,6 +5997,13 @@
       currentUser = null;
       renderAccountUI();
       closeMenu();
+      // Reservations are per account — the next person to sign in on this
+      // browser mustn't see this one's badges or bookings.
+      stopReservationSync();
+      myReservations = null;
+      localStorage.removeItem(RESERVATION_RECORDS_KEY);
+      document.getElementById('bookingsNavDot').hidden = true;
+      hideBookingsView();
       // Back to square one — same gate a first-time visitor sees, not just
       // the menu's own signed-out state, since staying on the app screen
       // after signing out would contradict the whole point of gating it.
@@ -4648,6 +6071,7 @@
       }
       renderAccountUI();
       document.getElementById('loginGate').hidden = !!currentUser;
+      if (currentUser) startReservationSync();
     }
 
     // The GIS <script> tag (see <head>) loads async — client_id also has to
