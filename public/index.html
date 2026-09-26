@@ -312,9 +312,139 @@
       display: none;
     }
 
+    /* A restaurant's own online booking gets an accent outline next to the
+       plain Reserve — it's the quicker route when it exists. */
     .card-map-btn.book-online {
       border-color: var(--ember-light);
       color: var(--ember);
+    }
+
+    /* The card's one filled button — Directions — so there's an obvious
+       next step. */
+    .card-map-btn.primary {
+      background: var(--ember);
+      border-color: var(--ember);
+      color: var(--paper);
+    }
+
+    .card-map-btn.primary:hover {
+      background: var(--ember-light);
+      border-color: var(--ember-light);
+      color: var(--paper);
+    }
+
+    body.dark .card-map-btn.primary,
+    body.dark .card-map-btn.primary:hover {
+      color: #14110F;
+    }
+
+    /* Card cleanup: labelled main actions on the left, a compact icon row
+       (Call / Website / Menu / Share) on the right. */
+    .card-actions {
+      justify-content: space-between;
+      row-gap: 8px;
+    }
+
+    .card-actions-main,
+    .card-actions-icons {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .card-actions-main {
+      flex-wrap: wrap;
+    }
+
+    .card-actions-main .card-map-btn {
+      font-size: 11px;
+      padding: 6px 12px;
+    }
+
+    .card-actions-main .card-map-btn i {
+      font-size: 13px;
+    }
+
+    .card-icon-btn {
+      width: 32px;
+      height: 32px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      border: 0.5px solid var(--border);
+      background: none;
+      color: var(--ink-2);
+      font-size: 15px;
+      text-decoration: none;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+
+    .card-icon-btn:hover {
+      color: var(--ember);
+      border-color: var(--ember);
+    }
+
+    /* Rating · price · distance · hours as one line of text */
+    .card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 2px 6px;
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--ink-2);
+      margin: -2px 0 8px;
+    }
+
+    .card-meta-rating {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .card-meta-rating i {
+      color: #C99A2E;
+      font-size: 11px;
+    }
+
+    .card-meta-sep {
+      color: var(--ink-3);
+    }
+
+    .card-meta-hours.open-now {
+      color: #2D6A27;
+    }
+
+    body.dark .card-meta-hours.open-now {
+      color: #5A9E54;
+    }
+
+    .card-meta-hours.closed-now {
+      color: var(--ink-3);
+    }
+
+    /* Two lines while collapsed; the full text once the card is opened. */
+    .card:not(.expanded) .card-summary {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .card-expand-hint {
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0;
+      color: var(--ink-2);
+      text-align: center;
+    }
+
+    .card-expand-hint i {
+      font-size: 12px;
+      vertical-align: -1px;
     }
 
     .card-map-btn.walk-in {
@@ -682,6 +812,18 @@
       color: #ef7a7a;
       border-color: #8a3a35;
       background: rgba(239, 122, 122, 0.1);
+    }
+
+    .analysis-reference {
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--ink-2);
+      margin: 4px 0 8px;
+    }
+
+    .analysis-reference strong {
+      font-weight: 600;
+      color: var(--ink);
     }
 
     /* Community review sort + "Helpful" votes */
@@ -1668,6 +1810,7 @@
         r.hours_status = details.hours_status;
         r.phone = details.phone;
         r.website = details.website;
+        if (details.price && !r.tags?.price) r.price = details.price;
         reviews = details.reviews || [];
         // Kept in full (not just reviews[0]) so the sheet can show a few
         // real customer quotes alongside the AI description — see
@@ -1885,6 +2028,9 @@
       { field: "dish", cls: "cuisine" },
       { field: "atmosphere", cls: "vibe" },
       { field: "location", cls: "vibe" },
+      { field: "city", cls: "vibe", label: a => `in ${a.city}` },
+      { field: "wants_new", cls: "vibe", label: () => "new places" },
+      { field: "similar_to", cls: "cuisine", label: a => `like ${a.reference?.name || a.similar_to}` },
       { field: "occasion", cls: "audience" },
       { field: "audience", cls: "audience" },
       { field: "price", cls: "price" },
@@ -1901,7 +2047,10 @@
       // first.
       const constraintTags = TAG_FIELDS
         .filter(t => a[t.field])
-        .map(t => `<span class="card-tag ${t.cls} removable-tag" role="button" tabindex="0" onclick="removeConstraint('${t.field}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();removeConstraint('${t.field}');}" title="Remove" aria-label="Remove ${escapeHtml(a[t.field])} filter">${escapeHtml(a[t.field])} <i class="ti ti-x"></i></span>`)
+        .map(t => {
+          const text = t.label ? t.label(a) : a[t.field];
+          return `<span class="card-tag ${t.cls} removable-tag" role="button" tabindex="0" onclick="removeConstraint('${t.field}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();removeConstraint('${t.field}');}" title="Remove" aria-label="Remove ${escapeHtml(text)} filter">${escapeHtml(text)} <i class="ti ti-x"></i></span>`;
+        })
         .join("");
 
       const mustNotTags = (a.must_not || [])
@@ -1915,6 +2064,15 @@
     // reflect that instantly instead of waiting on the round-trip. The
     // interpretation sentence and results still catch up once search()
     // resolves; only the tag row itself updates optimistically here.
+    // "Restaurants like X": shows what X was read as, so it's visible what
+    // the results were compared on — the user rarely says what they liked.
+    function referenceSummaryHtml(a) {
+      const ref = a.similar_to && a.reference;
+      if (!ref) return '';
+      const parts = [ref.cuisine, ref.dining_style, ref.price, ref.vibe !== 'unknown' ? ref.vibe : null].filter(Boolean);
+      return `<div class="analysis-reference">Compared with <strong>${escapeHtml(ref.name)}</strong>: ${parts.map(escapeHtml).join(' · ')}</div>`;
+    }
+
     function applyOptimisticTags(updated) {
       currentAnalysis = updated;
       const tagsEl = analysisBox.querySelector('.analysis-tags');
@@ -1929,6 +2087,7 @@
       // makes that flag meaningless, so clear it too rather than leaving it
       // stale for whatever search term ends up filling the gap.
       if (field === "dish") updated.is_brand = false;
+      if (field === "similar_to") updated.reference = null;
       applyOptimisticTags(updated);
       search(updated);
     }
@@ -1938,6 +2097,25 @@
       const updated = { ...currentAnalysis, must_not: currentAnalysis.must_not.filter(m => m !== item) };
       applyOptimisticTags(updated);
       search(updated);
+    }
+
+    // r.price can hold a placeholder rather than a price ("Rated 4.8★" /
+    // "See Google Maps" from the server's candidate list, "Price unknown"
+    // from scoring) — fine as model context, wrong on the price line.
+    function realPrice(value) {
+      return value && !/unknown|rated|see google/i.test(value) ? value : null;
+    }
+
+    // Fallback for records that were never given a distance (carousel
+    // picks, Saved, Bookings): straight-line km from wherever the user is
+    // now — same great-circle formula the server's getDistanceKm uses.
+    function distanceFromUserKm(r) {
+      if (userLatitude == null || userLongitude == null || r.latitude == null || r.longitude == null) return null;
+      const rad = d => d * Math.PI / 180;
+      const dLat = rad(r.latitude - userLatitude);
+      const dLon = rad(r.longitude - userLongitude);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(userLatitude)) * Math.cos(rad(r.latitude)) * Math.sin(dLon / 2) ** 2;
+      return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     function formatDistance(km) {
@@ -1998,10 +2176,9 @@
     // whatever loadBrowseMarkerDetails has filled in so far.
     // Every card — list, map popup, or the bottom sheet's single restaurant
     // (forceExpanded) alike — now starts collapsed and uses the same
-    // toggleCardExpand tap gesture; forceExpanded no longer changes the
-    // starting state, only whether "Show on map" makes sense (see below —
-    // reached via that exact restaurant's own marker, there's no other map
-    // to jump to).
+    // toggleCardExpand tap gesture. forceExpanded is still passed by those
+    // callers but no longer changes anything here — it used to hide the
+    // old "Show on map" button, which Directions has since replaced.
     function buildCardHtml(r, index, forceExpanded = false) {
       const hasScore = typeof r.score === "number";
       const scoreClass = r.score >= 80 ? "high" : r.score >= 50 ? "medium" : "low";
@@ -2011,28 +2188,33 @@
       // "tags" object existing — a real search always has tags, but a
       // browse-mode result never does, and it still has a real rating and
       // distance worth showing.
-      let cardTagsHtml = "";
-      if (r.tags?.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${escapeHtml(r.tags.cuisine)}</span>`;
-      else if (r.cuisine) cardTagsHtml += `<span class="card-tag cuisine">${escapeHtml(r.cuisine)}</span>`;
-      // Our own match score (when there is one) already shows as the big
-      // number on the card — this is Google's independent rating, the
+      // Cuisine is the one chip; the facts people scan for (rating, price,
+      // distance, hours) sit on a single plain-text line under it — a row
+      // of six equal-weight chips made the card slow to read.
+      const cuisine = r.tags?.cuisine || r.cuisine;
+      const cardTagsHtml = cuisine ? `<span class="card-tag cuisine">${escapeHtml(cuisine)}</span>` : "";
+      const metaParts = [];
+      // Our own match score (when there is one) already shows as the
+      // verdict on the card — this is Google's independent rating, the
       // number a user can actually cross-check against Maps/TripAdvisor.
-      if (r.rating) cardTagsHtml += `<span class="card-tag rating"><i class="ti ti-star-filled"></i> ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>`;
-      if (r.tags?.price) cardTagsHtml += `<span class="card-tag price">${escapeHtml(r.tags.price)}</span>`;
-      else if (r.price) cardTagsHtml += `<span class="card-tag price">${escapeHtml(r.price)}</span>`;
-      const distanceLabel = formatDistance(r.distance_km);
-      if (distanceLabel) cardTagsHtml += `<span class="card-tag highlight">${distanceLabel}</span>`;
+      if (r.rating) metaParts.push(`<span class="card-meta-rating"><i class="ti ti-star-filled"></i> ${r.rating}${r.review_count ? ` (${r.review_count})` : ''}</span>`);
+      const price = realPrice(r.tags?.price) || realPrice(r.price);
+      if (price) metaParts.push(escapeHtml(price));
+      const distanceLabel = formatDistance(r.distance_km ?? distanceFromUserKm(r));
+      // Searching another city measures from its centre, not from you.
+      if (distanceLabel) metaParts.push(r.distance_from === 'centre' ? `${distanceLabel} from centre` : distanceLabel);
       // hours_status ("Closes 10 PM", "Opens 11 AM tomorrow") comes from
       // Place Details' actual schedule — falls back to the plain
       // open/closed boolean when a place has no parsed hours at all.
       if (r.hours_status) {
         const hoursClass = r.open_now === false ? "closed-now" : "open-now";
-        cardTagsHtml += `<span class="card-tag ${hoursClass}">${escapeHtml(r.hours_status)}</span>`;
+        metaParts.push(`<span class="card-meta-hours ${hoursClass}">${escapeHtml(r.hours_status)}</span>`);
       } else if (r.open_now === true) {
-        cardTagsHtml += `<span class="card-tag open-now">Open now</span>`;
+        metaParts.push(`<span class="card-meta-hours open-now">Open now</span>`);
       } else if (r.open_now === false) {
-        cardTagsHtml += `<span class="card-tag closed-now">Closed</span>`;
+        metaParts.push(`<span class="card-meta-hours closed-now">Closed</span>`);
       }
+      const cardMetaHtml = metaParts.length ? `<div class="card-meta">${metaParts.join('<span class="card-meta-sep">·</span>')}</div>` : "";
 
       // Browse mode never has AI-scoring evidence (r.evidence) — that's
       // Sonnet's "why this matched your search" output, specific to a real
@@ -2063,30 +2245,40 @@
       // also scheme-checked — it's Google-sourced, not user-typed, but
       // there's no reason to trust it enough to let a "javascript:" URL
       // through as a clickable link.
-      let actionsHtml = "";
+      // Two tiers so the card has a clear next step: the booking action
+      // (filled) and Directions as labelled buttons, then Call / Website /
+      // Menu / Share as a compact icon row. Directions also covers the old
+      // "Show on map" — it switches to our map with the place and route on
+      // it, and most people couldn't tell those two buttons apart.
+      let mainActionsHtml = "";
+      // Directions leads (filled): getting there is what most people do
+      // next; booking is the second step.
       if (r.latitude && r.longitude) {
-        actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); showRouteOnMap(${index}, 'driving')"><i class="ti ti-directions"></i> Directions</button>`;
+        mainActionsHtml += `<button class="card-map-btn primary" onclick="event.stopPropagation(); showRouteOnMap(${index}, 'driving')"><i class="ti ti-directions"></i> Directions</button>`;
       }
       // Gated on place_id: it's the key the stored reservation record (and
       // so the status badge/polling) hangs off, same as askBoxHtml below.
       // Starts as plain Reserve and is swapped for the place's real booking
       // route once known (see loadBookingOptions).
       if (r.place_id) {
-        actionsHtml += `<span class="booking-action">${bookingActionHtml(r, index)}</span>`;
+        mainActionsHtml += `<span class="booking-action">${bookingActionHtml(r, index)}</span>`;
       }
+      const iconBtn = (icon, label, attrs) =>
+        `<${attrs.href ? 'a' : 'button type="button"'} class="card-icon-btn" ${Object.entries(attrs).map(([k, v]) => `${k}="${v}"`).join(' ')} title="${label}" aria-label="${label}"><i class="ti ti-${icon}"></i></${attrs.href ? 'a' : 'button'}>`;
+      let iconActionsHtml = "";
       if (r.phone) {
-        actionsHtml += `<a class="card-map-btn" href="tel:${escapeHtml(r.phone)}" onclick="event.stopPropagation()"><i class="ti ti-phone"></i> Call</a>`;
+        iconActionsHtml += iconBtn('phone', 'Call', { href: `tel:${escapeHtml(r.phone)}`, onclick: 'event.stopPropagation()' });
       }
       if (r.website && isSafeUrl(r.website)) {
-        actionsHtml += `<a class="card-map-btn" href="${escapeHtml(r.website)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-world"></i> Website</a>`;
+        iconActionsHtml += iconBtn('world', 'Website', { href: escapeHtml(r.website), target: '_blank', rel: 'noopener', onclick: 'event.stopPropagation()' });
       }
       // Google Places has no dedicated menu field — this is a search
       // shortcut, not a confirmed official menu link. It works even when
       // there's no website at all, and the search happens in the user's
       // own browser, so Google localizes it without us needing to embed
       // an address in the query.
-      actionsHtml += `<a class="card-map-btn" href="https://www.google.com/search?q=${encodeURIComponent(r.name + " menu")}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-book-2"></i> Menu</a>`;
-      actionsHtml += `<button class="card-map-btn" onclick="event.stopPropagation(); shareRestaurant(${index})"><i class="ti ti-share-2"></i> Share</button>`;
+      iconActionsHtml += iconBtn('book-2', 'Menu', { href: `https://www.google.com/search?q=${encodeURIComponent(r.name + " menu")}`, target: '_blank', rel: 'noopener', onclick: 'event.stopPropagation()' });
+      iconActionsHtml += iconBtn('share-2', 'Share', { onclick: `event.stopPropagation(); shareRestaurant(${index})` });
 
       // JS-string-escape first (for the single-quoted argument inside
       // onclick), then HTML-escape the result (for the double-quoted
@@ -2157,8 +2349,8 @@
             </div>
           </div>
           ${reservationBadgeHtml(r)}
-          <div class="card-tags">${cardTagsHtml}</div>
-            ${hasScore && r.score < 80 ? `<p class="card-score-hint">${escapeHtml(scoreHint(r.score))}</p>` : ''}
+          ${cardTagsHtml ? `<div class="card-tags">${cardTagsHtml}</div>` : ''}
+          ${cardMetaHtml}
           ${summaryHtml}
           ${galleryHtml}
           ${evidenceHtml}
@@ -2166,15 +2358,8 @@
           ${askBoxHtml}
           <div class="card-footer">
             <div class="card-actions">
-              <!-- "Show on map" only makes sense from a list of results you
-                   scrolled to find this one in — the sheet (forceExpanded)
-                   is reached by tapping this exact restaurant's marker, so
-                   the map it'd jump to is the one already right there. -->
-              ${forceExpanded ? '' : `
-              <button class="card-map-btn" onclick="event.stopPropagation(); focusOnMap(${index})">
-                <i class="ti ti-map-pin"></i> Show on map
-              </button>`}
-              ${actionsHtml}
+              ${mainActionsHtml ? `<div class="card-actions-main">${mainActionsHtml}</div>` : ''}
+              <div class="card-actions-icons">${iconActionsHtml}</div>
             </div>
             <!-- Always rendered, not just for the non-forceExpanded list
                  case — .card.expanded .hint-text already hides this via CSS
@@ -2185,7 +2370,7 @@
                  no way to signal that tapping again collapses them, since
                  toggleCardExpand now applies there too (see the card's own
                  onclick above). -->
-            <div class="card-expand-hint"><span class="hint-text">tap for reviews</span></div>
+            <div class="card-expand-hint"><span class="hint-text">Reviews, photos &amp; questions <i class="ti ti-chevron-down"></i></span></div>
           </div>
         </div>`;
     }
@@ -4022,6 +4207,7 @@
           <div class="analysis-title">What I understood</div>
           ${locationWarningHtml}
           <div class="analysis-interpretation">${escapeHtml(a.interpretation)}</div>
+          ${referenceSummaryHtml(a)}
           <div class="analysis-tags">${tagsHtml}</div>`;
         analysisBox.style.display = "block";
         error.style.display = "none";
@@ -5415,6 +5601,10 @@
       // browse mode), so nothing extra needs tracking for the restore.
       closeBottomSheet();
       document.getElementById('resultsSheet').classList.add('route-hidden');
+      // The list's dimming backdrop belongs to its 'full' state — Directions
+      // tapped from the full list slid the sheet away but left the map
+      // dimmed (and blocked) behind the route.
+      document.getElementById('resultsSheetBackdrop').classList.remove('open', 'blocking');
 
       routeTargetIndex = index;
       if (mode) routeMode = mode;
