@@ -2940,30 +2940,6 @@ body.dark .login-gate {
     color: var(--ember);
 }
 
-/* Single line, truncated with an ellipsis, by default — every saved card
-   stays the same height regardless of how long a note is (a 4-line note
-   was making some cards visibly taller than their neighbors). Same "tap to
-   reveal the rest, in place" pattern this app already uses for a search
-   result's own reviews (see .card-expand-hint/toggleCardExpand) — not a
-   new interaction to learn, and it still doesn't require opening edit mode
-   just to read the full note. */
-.saved-list-note {
-    margin-top: 5px;
-    font-family: var(--sans);
-    font-size: 12px;
-    font-style: italic;
-    color: var(--ink-3);
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.saved-list-note.expanded {
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
 /* ── Saved page toolbar (sort + mini-map toggle) ── */
 .saved-toolbar {
     max-width: 480px;
@@ -3587,4 +3563,13 @@ body.dark .login-gate {
     .saved-view-list {
         max-width: 960px;
     }
+}
+/* The personal note editor gets a roomier box than the review editor that
+   shares .saved-edit-note — notes tend to run longer, and three lines made
+   anything past a sentence hard to read back while typing. Capped so the
+   Save button stays on screen above a phone keyboard. */
+#savedEditNote {
+    line-height: 1.5;
+    max-height: 40vh;
+    overflow-y: auto;
 }

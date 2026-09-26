@@ -826,6 +826,67 @@
       color: var(--ink);
     }
 
+    /* Saved list: note chip + the sheet that shows the full note */
+    .saved-list-meta {
+      flex-wrap: wrap;
+      row-gap: 4px;
+    }
+
+    .saved-note-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: none;
+      border: 0.5px dashed var(--ink-3);
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-family: var(--sans);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--ink-3);
+      cursor: pointer;
+    }
+
+    .saved-note-chip i {
+      font-size: 11px;
+    }
+
+    .saved-note-chip.has-note {
+      border-style: solid;
+      border-color: var(--ember-light);
+      color: var(--ember);
+    }
+
+    .saved-note-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--ink-3);
+      margin: 4px 0 6px;
+    }
+
+    .saved-note-stars i {
+      font-size: 11px;
+      color: var(--ember);
+    }
+
+    .saved-note-text {
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--ink);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-height: 50vh;
+      overflow-y: auto;
+      margin-bottom: 14px;
+    }
+
     /* Community review sort + "Helpful" votes */
     .community-review-sort {
       display: flex;
@@ -1130,8 +1191,21 @@
     <div class="save-picker-card">
       <p class="save-picker-title" id="savedEditTitle">Your notes</p>
       <div class="saved-edit-stars" id="savedEditStars"></div>
-      <textarea class="saved-edit-note" id="savedEditNote" placeholder="Anything worth remembering, like a dish or a table you liked…" rows="3"></textarea>
+      <textarea class="saved-edit-note" id="savedEditNote" placeholder="Anything worth remembering, like a dish or a table you liked…" rows="7" maxlength="1000"></textarea>
       <button class="save-picker-new-btn saved-edit-save" onclick="saveSavedEdit()">Save</button>
+    </div>
+  </div>
+
+  <!-- Reading a saved note in full (see openSavedNote) -->
+  <div class="save-picker-overlay" id="savedNoteOverlay" onclick="if (event.target === this) closeSavedNote()">
+    <div class="save-picker-card">
+      <button class="save-picker-close-btn" onclick="closeSavedNote()" title="Close" aria-label="Close">
+        <i class="ti ti-x"></i>
+      </button>
+      <p class="save-picker-title" id="savedNoteTitle"></p>
+      <p class="saved-note-label">Your note <span class="saved-note-stars" id="savedNoteStars"></span></p>
+      <p class="saved-note-text" id="savedNoteText"></p>
+      <button class="save-picker-new-btn saved-edit-save" onclick="editSavedNote()"><i class="ti ti-pencil"></i> Edit</button>
     </div>
   </div>
 
@@ -4412,6 +4486,35 @@
 
     const SAVED_RESTAURANTS_KEY = "savedRestaurants";
 
+    // ── Cleaning user-typed text (notes, category names) ──
+    // Saved lists can be shared, and later maybe with notes — so what a
+    // person types is cleaned when it's stored, not just escaped when it's
+    // shown (which every render path already does: escapeHtml/textContent).
+    // Removes what has no business in a note and can mislead whoever reads
+    // it: invisible control characters, zero-width characters, and the
+    // right-to-left override tricks used to disguise text or links. ZWJ
+    // (‍) stays — emoji like 👨‍🍳 are built with it.
+    const SAVED_NOTE_MAX = 1000;
+    const CATEGORY_NAME_MAX = 40;
+    const INVISIBLE_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F​‌‎‏‪-‮⁠-⁩﻿]/g;
+
+    function sanitizeUserText(value, maxLength, { multiline = false } = {}) {
+      let text = String(value ?? '').normalize('NFC').replace(/\r\n?/g, '\n').replace(/\t/g, ' ').replace(INVISIBLE_CHARS_RE, '');
+      text = multiline
+        ? text.split('\n').map(line => line.replace(/\s+$/, '')).join('\n').replace(/\n{3,}/g, '\n\n')
+        : text.replace(/\s+/g, ' ');
+      // Array.from counts characters, not UTF-16 units, so the cut never
+      // splits an emoji in half.
+      return Array.from(text.trim()).slice(0, maxLength).join('').trim();
+    }
+
+    // Your own 1-5 stars, or null — also guards the '★'.repeat() renders
+    // against a tampered or imported value like 1e9.
+    function cleanMyRating(value) {
+      const n = Math.round(Number(value));
+      return n >= 1 && n <= 5 ? n : null;
+    }
+
     function loadSavedRestaurants() {
       try {
         const list = JSON.parse(localStorage.getItem(SAVED_RESTAURANTS_KEY) || "[]");
@@ -4421,6 +4524,12 @@
         let migrated = false;
         list.forEach(r => { if (!r.categoryId) { r.categoryId = "liked"; migrated = true; } });
         if (migrated) localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(list));
+        // Cleaned on the way in too, not only when typed — covers notes
+        // saved before this existed, and whatever an imported list brings.
+        list.forEach(r => {
+          if (r.myNote) r.myNote = sanitizeUserText(r.myNote, SAVED_NOTE_MAX, { multiline: true });
+          if (r.myRating != null) r.myRating = cleanMyRating(r.myRating);
+        });
         return list;
       } catch (e) {
         return [];
@@ -4445,7 +4554,9 @@
     function loadSavedCategories() {
       try {
         const raw = JSON.parse(localStorage.getItem(SAVED_CATEGORIES_KEY) || "null");
-        if (Array.isArray(raw) && raw.length > 0) return raw;
+        if (Array.isArray(raw) && raw.length > 0) {
+          return raw.map(c => ({ ...c, name: sanitizeUserText(c.name, CATEGORY_NAME_MAX) || 'Untitled' }));
+        }
       } catch (e) { /* fall through to defaults */ }
       const defaults = [
         { id: "liked", name: "Liked" },
@@ -4461,7 +4572,7 @@
     }
 
     function createCategory(name) {
-      const trimmed = (name || "").trim();
+      const trimmed = sanitizeUserText(name, CATEGORY_NAME_MAX);
       if (!trimmed) return null;
       const categories = loadSavedCategories();
       const category = { id: `cat-${Date.now().toString(36)}`, name: trimmed };
@@ -4862,9 +4973,14 @@
         const myRatingHtml = r.myRating
           ? `<span class="saved-list-my-rating">${'<i class="ti ti-star-filled"></i>'.repeat(r.myRating)}</span>`
           : '';
+        // A labelled chip rather than the note text itself: it says plainly
+        // that notes exist, and it's a real button — tapping a truncated
+        // line of text to expand it too often missed and opened the
+        // restaurant instead. "Note" opens the full note; "+ Note" goes
+        // straight to writing one.
         const noteHtml = r.myNote
-          ? `<p class="saved-list-note" onclick="event.stopPropagation(); this.classList.toggle('expanded')">${escapeHtml(r.myNote)}</p>`
-          : '';
+          ? `<button type="button" class="saved-note-chip has-note" onclick="event.stopPropagation(); openSavedNote('${escapedName}')" aria-label="Read your note on ${escapeHtml(r.name)}"><i class="ti ti-notes"></i> Note</button>`
+          : `<button type="button" class="saved-note-chip" onclick="event.stopPropagation(); openSavedEditor('${escapedName}')" aria-label="Add a note on ${escapeHtml(r.name)}"><i class="ti ti-plus"></i> Note</button>`;
         return `
           <div class="saved-list-item" onclick="viewSavedRestaurant('${escapedName}')">
             ${photoHtml}
@@ -4874,8 +4990,8 @@
                 ${r.rating ? `<span class="saved-list-rating"><i class="ti ti-star-filled"></i> ${r.rating}</span>` : ''}
                 ${cat ? `<span class="saved-list-cat-tag">${escapeHtml(cat.name)}</span>` : ''}
                 ${myRatingHtml}
+                ${noteHtml}
               </div>
-              ${noteHtml}
             </div>
             <div class="saved-list-actions">
               <i class="ti ti-pencil saved-list-edit" role="button" tabindex="0" onclick="event.stopPropagation(); openSavedEditor('${escapedName}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();openSavedEditor('${escapedName}');}" title="Add a note or rating" aria-label="Add a note or rating for ${escapeHtml(r.name)}"></i>
@@ -4899,6 +5015,33 @@
       document.getElementById('savedEditNote').value = item.myNote || '';
       renderSavedEditStars();
       document.getElementById('savedEditOverlay').classList.add('open');
+    }
+
+    // Read-only view of a saved note — the full text, with Edit one tap
+    // away (same editor as the pencil).
+    let viewingSavedNoteName = null;
+
+    function openSavedNote(name) {
+      const item = loadSavedRestaurants().find(s => s.name === name);
+      if (!item?.myNote) return;
+      viewingSavedNoteName = name;
+      document.getElementById('savedNoteTitle').textContent = item.name;
+      document.getElementById('savedNoteStars').innerHTML = item.myRating
+        ? '<i class="ti ti-star-filled"></i>'.repeat(item.myRating)
+        : '';
+      document.getElementById('savedNoteText').textContent = item.myNote;
+      document.getElementById('savedNoteOverlay').classList.add('open');
+    }
+
+    function closeSavedNote() {
+      document.getElementById('savedNoteOverlay').classList.remove('open');
+      viewingSavedNoteName = null;
+    }
+
+    function editSavedNote() {
+      const name = viewingSavedNoteName;
+      closeSavedNote();
+      if (name) openSavedEditor(name);
     }
 
     function closeSavedEditor() {
@@ -4926,8 +5069,8 @@
       const items = loadSavedRestaurants();
       const item = items.find(s => s.name === editingSavedName);
       if (item) {
-        item.myRating = editingSavedRating || null;
-        item.myNote = document.getElementById('savedEditNote').value.trim();
+        item.myRating = cleanMyRating(editingSavedRating);
+        item.myNote = sanitizeUserText(document.getElementById('savedEditNote').value, SAVED_NOTE_MAX, { multiline: true });
         localStorage.setItem(SAVED_RESTAURANTS_KEY, JSON.stringify(items));
       }
       closeSavedEditor();
